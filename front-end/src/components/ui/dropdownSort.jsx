@@ -37,6 +37,7 @@ const DropdownSort = ({
       buttonClassName={[
         "px-4 py-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
         "bg-neutral-300 text-text-primary focus:ring-neutral-400",
+        "dark:bg-surface dark:text-text-primary dark:border dark:border-border dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50 dark:focus:border-neutral-600/60",
         buttonClassName,
       ].join(" ")}
       menuClassName="w-[260px] shadow-xl"
@@ -46,7 +47,7 @@ const DropdownSort = ({
     >
       {({ closeMenu }) => (
         <div className="w-full">
-          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
               <SlidersHorizontal size={16} strokeWidth={1.5} />
               <span>{label}</span>
@@ -54,7 +55,7 @@ const DropdownSort = ({
             <button
               type="button"
               onClick={closeMenu}
-              className="rounded-md p-1 text-text-secondary hover:bg-gray-100 hover:text-text-primary"
+              className="rounded-md p-1 text-text-secondary hover:bg-surface/70 hover:text-text-primary"
               aria-label="Fermer"
             >
               <X size={16} strokeWidth={1.5} />
@@ -165,11 +166,11 @@ const DropdownSort = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50/60 px-4 py-3">
+          <div className="flex items-center justify-between border-t border-border bg-surface/80 px-4 py-3">
             <button
               type="button"
               onClick={handleResetAll}
-              className="rounded-lg bg-neutral-200 px-3 py-2 text-sm font-medium text-text-primary hover:bg-neutral-300"
+              className="rounded-lg bg-neutral-200 px-3 py-2 text-sm font-medium text-text-primary hover:bg-neutral-300 dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
             >
               Réinitialiser
             </button>

@@ -4,6 +4,41 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: 243 244 246;
+    --surface: 255 255 255;
+    --border: 229 231 235;
+    --text-primary: 17 24 39;
+    --text-secondary: 107 114 128;
+    --header: 169 189 182;
+  }
+
+  .dark {
+    --background: 12 20 21;
+    --surface: 18 27 28;
+    --border: 60 78 80;
+    --text-primary: 203 213 225;
+    --text-secondary: 148 163 184;
+    --header: 29 71 63;
+  }
+
+  .dark input[type="date"] {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: rgb(var(--background));
+    color: rgb(var(--text-primary));
+  }
+
+  .theme-transition,
+  .theme-transition * {
+    transition: background-color 320ms ease, color 320ms ease,
+      border-color 320ms ease, fill 320ms ease, stroke 320ms ease;
+  }
+}
+
 
 @layer utilities {
   .no-scrollbar::-webkit-scrollbar {
@@ -25,13 +60,28 @@
   }
 
   .table-scroll::-webkit-scrollbar-thumb {
-    background: #4b5565;
+    background: #b0bbb7;
     border-radius: 999px;
   }
 
   .table-scroll {
     scrollbar-width: thin;
-    scrollbar-color: #4b5565 #f3f4f6;
+    scrollbar-color: #b0bbb7 #f3f4f6;
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .toast-enter {
+    animation: toast-in 220ms ease;
   }
 }
 
@@ -44,7 +94,7 @@
   }
 
   .main{
-    @apply w-full flex flex-col gap-0 
+    @apply w-full h-full flex flex-col gap-0 
   }
 
   .layoutSection {
@@ -52,19 +102,19 @@
   }
 
   .sidebar {
-    @apply w-80 h-full bg-primary text-white flex flex-col items-start justify-between
+    @apply w-80 h-full bg-secondary text-white flex flex-col items-start justify-between dark:bg-primary
   }
 
   .sectionDashboard{
-    @apply w-full flex items-start justify-start gap-2 p-2
+    @apply w-full h-full flex items-start justify-start gap-2 p-2
   }
 
   .mainBloc{
-    @apply flex-1 flex flex-col h-full border rounded-lg p-2
+    @apply flex-1 flex flex-col h-full border border-border bg-surface rounded-lg p-2
   }
 
   .sideBloc{
-    @apply w-1/4 rounded-lg p-2 border
+    @apply w-1/4 h-full rounded-lg p-2 border border-border bg-surface
   }
 
 

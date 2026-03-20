@@ -12,10 +12,10 @@ const textarea = ({ label, name, register, errors, ...props }) => {
         {...registerProps}
         {...props}
         className={[
-          "border p-2 rounded-lg focus:outline-none focus:ring-2",
+          "border p-2 rounded-lg bg-surface text-text-primary placeholder:text-text-secondary focus:outline-none focus:ring-2",
           hasError
             ? "border-red-500 ring-1 ring-red-500 focus:ring-red-500"
-            : "border-gray-300 focus:ring-accent",
+            : "border-border focus:ring-accent",
         ].join(" ")}
       />
 

@@ -3,12 +3,7 @@ import { NavLink } from "react-router-dom";
 import { items } from "../../../utils/sidebarItems";
 import useUiStore from "../../../stores/uiStore";
 
-const SETTINGS_LINKS = new Set([
-  "notifications",
-  "settings",
-  "help",
-  "logout",
-]);
+const SETTINGS_LINKS = new Set(["settings", "help", "logout"]);
 
 const ListItemSettings = () => {
   const isSidebarOpen = useUiStore((state) => state.isSidebarOpen);

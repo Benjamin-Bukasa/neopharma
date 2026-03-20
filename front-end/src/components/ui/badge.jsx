@@ -18,9 +18,11 @@ const VARIANT_CLASSES = {
   success: "bg-success/15 text-success border-success/30",
   warning: "bg-warning/15 text-warning border-warning/30",
   danger: "bg-danger/15 text-danger border-danger/30",
-  active: "bg-[#b0bbb7] text-text-primary border-[#b0bbb7]",
-  inactive: "bg-neutral-300 text-text-primary border-neutral-300",
-  neutral: "bg-gray-100 text-gray-700 border-gray-200",
+  active:
+    "bg-[#b0bbb7] text-text-primary border-[#b0bbb7] dark:bg-success/15 dark:text-success dark:border-success/30",
+  inactive:
+    "bg-neutral-300 text-text-primary border-neutral-300 dark:bg-danger/15 dark:text-danger dark:border-danger/30",
+  neutral: "bg-surface/80 text-text-secondary border-border",
 };
 
 const Badge = ({

@@ -1,19 +1,6 @@
-import React from 'react'
+import React from "react";
+import CounterList from "../features/CounterList";
 
-function Counter() {
-  return (
-    <>
-      <section className="sectionDashboard">
-          <div className="mainBloc">
-            <h1 className="text-3xl font-bold">Caisse</h1>
-            <p className="">Ici on affichera la liste de produit en stock pour la vente</p>
-          </div>
-          <div className="sideBloc">
+const Counter = () => <CounterList />;
 
-          </div>
-      </section>
-    </>
-  )
-}
-
-export default Counter
+export default Counter;

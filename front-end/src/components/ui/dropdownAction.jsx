@@ -139,13 +139,13 @@ const dropdownAction = ({
     if (children) return children;
 
     return items.map((item) => {
-      const label = (item.label ?? "").toLowerCase();
+      const label = (item.label ?? "");
       const isDanger = item.variant === "danger";
       const baseClasses =
         "w-full text-left px-2 py-1 text-sm rounded-lg border transition-colors";
       const variantClasses = isDanger
-        ? "bg-red-50 text-red-600 border-red-600 hover:bg-red-100"
-        : "bg-transparent text-primary border-transparent hover:bg-neutral-200/80";
+        ? "bg-red-50 text-red-600 border-red-600 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/50"
+        : "bg-transparent text-text-primary border-transparent hover:bg-neutral-200/80 dark:hover:bg-white/10";
 
       return (
         <button
@@ -194,7 +194,7 @@ const dropdownAction = ({
         <div
           ref={menuRef}
           className={[
-            "absolute z-50 min-w-[180px] rounded-lg bg-white text-text-primary shadow-lg border border-gray-200",
+            "absolute z-50 min-w-[180px] rounded-lg bg-surface text-text-primary shadow-lg border border-border",
             direction === "down" ? "top-full mt-2" : "bottom-full mb-2",
             align === "right" ? "right-0" : "left-0",
             menuClassName,

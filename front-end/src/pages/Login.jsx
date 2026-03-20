@@ -1,12 +1,16 @@
-import React from 'react'
+import React from "react";
+import LoginLeft from "../components/blocs/Login/LoginLeft";
+import LoginRight from "../components/blocs/Login/LoginRight";
 
 function Login() {
   return (
-    <>
-      <h1 className="text-3xl font-bold">Connexion</h1>
-      <p className="">Ici on affichera le formulaire de connexion</p>
-    </>
-  )
+    <section className="min-h-screen w-full bg-background text-text-primary font-poppins">
+      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
+        <LoginLeft />
+        <LoginRight />
+      </div>
+    </section>
+  );
 }
 
-export default Login
+export default Login;

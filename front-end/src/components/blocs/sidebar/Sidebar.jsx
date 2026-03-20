@@ -1,8 +1,8 @@
 import React from "react";
-import Logo from "./sidebar/Logo";
-import useUiStore from "../../stores/uiStore";
-import ListItemClient from "./sidebar/ListItemClient";
-import ListItemSettings from './sidebar/ListItemSettings';
+import Logo from "./Logo";
+import useUiStore from "../../../stores/uiStore";
+import ListItemClient from "./ListItemClient";
+import ListItemSettings from './ListItemSettings';
 
 const Sidebar = () => {
   const isSidebarOpen = useUiStore((state) => state.isSidebarOpen);

@@ -1,9 +1,13 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { useEffect, useMemo, useState } from "react";
 import { EllipsisVertical, SquarePen, Trash, Eye } from "lucide-react";
 import DataTable from "../components/ui/datatable";
 import DropdownAction from "../components/ui/dropdownAction";
 import Modal from "../components/ui/modal";
 import Badge from "../components/ui/badge";
+import useToastStore from "../stores/toastStore";
+import { apiDelete } from "../services/apiClient";
+import { useProductsData } from "../hooks/useProductsData";
 
 const CATEGORY_AVATAR_MAP = {
   antalgique: [
@@ -48,7 +52,7 @@ const CATEGORY_AVATAR_MAP = {
 const DEFAULT_AVATAR =
   "https://images.pexels.com/photos/4210607/pexels-photo-4210607.jpeg?auto=compress&cs=tinysrgb&w=120&h=120&fit=crop";
 
-const resolveCategoryAvatar = (category, seed = 0) => {
+export const resolveCategoryAvatar = (category, seed = 0) => {
   const key = category?.toLowerCase?.().trim?.() ?? "";
   const list = CATEGORY_AVATAR_MAP[key];
   if (!list || list.length === 0) return DEFAULT_AVATAR;
@@ -56,27 +60,83 @@ const resolveCategoryAvatar = (category, seed = 0) => {
   return list[index];
 };
 
+const escapeCsvValue = (value) => {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+};
+
+const buildCsvContent = (rows, columns) => {
+  const header = columns.map((column) => escapeCsvValue(column.header)).join(",");
+  const lines = rows.map((row) =>
+    columns
+      .map((column) => escapeCsvValue(row?.[column.accessor]))
+      .join(",")
+  );
+  return [header, ...lines].join("\n");
+};
+
+const escapeHtmlValue = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
+
+const buildHtmlTable = (rows, columns) => {
+  const headerRow = columns
+    .map((column) => `<th>${escapeHtmlValue(column.header)}</th>`)
+    .join("");
+  const bodyRows = rows
+    .map((row) => {
+      const cells = columns
+        .map((column) => `<td>${escapeHtmlValue(row?.[column.accessor])}</td>`)
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return `<table><thead><tr>${headerRow}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+};
+
+const downloadBlob = (blob, filename) => {
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+};
+
 export const productsData = [
-  { id: 1, product: "Doliprane 1000 mg", category: "Antalgique", status: "Actif", activity: "time-charge", date: "2024-09-01", stock: "En stock" },
-  { id: 2, product: "Amoxicilline 500 mg", category: "Antibiotique", status: "Inactif", activity: "consultation", date: "2024-09-02", stock: "Faible" },
-  { id: 3, product: "Ibuprofène 400 mg", category: "Anti-inflammatoire", status: "Inactif", activity: "time-charge", date: "2024-09-03", stock: "Épuisé" },
-  { id: 4, product: "Paracétamol 500 mg", category: "Antalgique", status: "Actif", activity: "consultation", date: "2024-09-04", stock: "En stock" },
-  { id: 5, product: "Azithromycine 250 mg", category: "Antibiotique", status: "Actif", activity: "time-charge", date: "2024-09-05", stock: "Faible" },
-  { id: 6, product: "Cétirizine 10 mg", category: "Antihistaminique", status: "Actif", activity: "consultation", date: "2024-09-06", stock: "En stock" },
-  { id: 7, product: "Oméprazole 20 mg", category: "Gastro-entérologie", status: "Actif", activity: "time-charge", date: "2024-09-07", stock: "Faible" },
-  { id: 8, product: "Ventoline 100 µg", category: "Respiratoire", status: "Actif", activity: "consultation", date: "2024-09-08", stock: "En stock" },
-  { id: 9, product: "Metformine 500 mg", category: "Diabète", status: "Actif", activity: "time-charge", date: "2024-09-09", stock: "Épuisé" },
-  { id: 10, product: "Lisinopril 10 mg", category: "Cardiologie", status: "Actif", activity: "consultation", date: "2024-09-10", stock: "En stock" },
-  { id: 11, product: "Atorvastatine 20 mg", category: "Cardiologie", status: "Actif", activity: "time-charge", date: "2024-09-11", stock: "Faible" },
-  { id: 12, product: "Sertraline 50 mg", category: "Psychiatrie", status: "Actif", activity: "consultation", date: "2024-09-12", stock: "En stock" },
-  { id: 13, product: "Levothyrox 50 µg", category: "Endocrinologie", status: "Actif", activity: "time-charge", date: "2024-09-13", stock: "En stock" },
-  { id: 14, product: "Prednisone 20 mg", category: "Corticoïde", status: "Actif", activity: "consultation", date: "2024-09-14", stock: "Faible" },
-  { id: 15, product: "Ranitidine 150 mg", category: "Gastro-entérologie", status: "Actif", activity: "time-charge", date: "2024-09-15", stock: "Épuisé" },
+  { id: 1, product: "Doliprane 1000 mg", category: "Antalgique", status: "Actif", activity: "time-charge", date: "2024-09-01", stock: "En stock", quantity: 120, price: 4.5 },
+  { id: 2, product: "Amoxicilline 500 mg", category: "Antibiotique", status: "Inactif", activity: "consultation", date: "2024-09-02", stock: "Faible", quantity: 32, price: 8.2 },
+  { id: 3, product: "Ibuprofène 400 mg", category: "Anti-inflammatoire", status: "Inactif", activity: "time-charge", date: "2024-09-03", stock: "Épuisé", quantity: 0, price: 5.8 },
+  { id: 4, product: "Paracétamol 500 mg", category: "Antalgique", status: "Actif", activity: "consultation", date: "2024-09-04", stock: "En stock", quantity: 240, price: 3.2 },
+  { id: 5, product: "Azithromycine 250 mg", category: "Antibiotique", status: "Actif", activity: "time-charge", date: "2024-09-05", stock: "Faible", quantity: 18, price: 12.5 },
+  { id: 6, product: "Cétirizine 10 mg", category: "Antihistaminique", status: "Actif", activity: "consultation", date: "2024-09-06", stock: "En stock", quantity: 75, price: 6.4 },
+  { id: 7, product: "Oméprazole 20 mg", category: "Gastro-entérologie", status: "Actif", activity: "time-charge", date: "2024-09-07", stock: "Faible", quantity: 22, price: 9.1 },
+  { id: 8, product: "Ventoline 100 µg", category: "Respiratoire", status: "Actif", activity: "consultation", date: "2024-09-08", stock: "En stock", quantity: 90, price: 14.0 },
+  { id: 9, product: "Metformine 500 mg", category: "Diabète", status: "Actif", activity: "time-charge", date: "2024-09-09", stock: "Épuisé", quantity: 0, price: 7.3 },
+  { id: 10, product: "Lisinopril 10 mg", category: "Cardiologie", status: "Actif", activity: "consultation", date: "2024-09-10", stock: "En stock", quantity: 140, price: 11.9 },
+  { id: 11, product: "Atorvastatine 20 mg", category: "Cardiologie", status: "Actif", activity: "time-charge", date: "2024-09-11", stock: "Faible", quantity: 15, price: 16.4 },
+  { id: 12, product: "Sertraline 50 mg", category: "Psychiatrie", status: "Actif", activity: "consultation", date: "2024-09-12", stock: "En stock", quantity: 60, price: 10.7 },
+  { id: 13, product: "Levothyrox 50 µg", category: "Endocrinologie", status: "Actif", activity: "time-charge", date: "2024-09-13", stock: "En stock", quantity: 110, price: 8.9 },
+  { id: 14, product: "Prednisone 20 mg", category: "Corticoïde", status: "Actif", activity: "consultation", date: "2024-09-14", stock: "Faible", quantity: 28, price: 6.1 },
+  { id: 15, product: "Ranitidine 150 mg", category: "Gastro-entérologie", status: "Actif", activity: "time-charge", date: "2024-09-15", stock: "Épuisé", quantity: 0, price: 5.0 },
 ];
 
 export const productsColumns = [
   {
-    header: "Avatar",
+    header: "Image",
     accessor: "avatar",
     render: (row) => {
       const avatarSrc = resolveCategoryAvatar(row.category, row.id);
@@ -92,6 +152,7 @@ export const productsColumns = [
   },
   { header: "Produit", accessor: "product" },
   { header: "Catégorie", accessor: "category" },
+  { header: "Qte", accessor: "quantity" },
   {
     header: "Status",
     accessor: "status",
@@ -100,15 +161,21 @@ export const productsColumns = [
   { header: "Stock", accessor: "stock", render: (row) => <Badge status={row.stock} /> },
 ];
 
-const ProductsList = () => {
-  const [products, setProducts] = useState(productsData);
+const ProductsList = ({
+  tableMaxHeightClass = "max-h-[46vh]",
+  storeId = null,
+} = {}) => {
+  const { products: apiProducts, loading, refresh } = useProductsData({
+    storeId,
+  });
+  const [products, setProducts] = useState([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [search, setSearch] = useState("");
   const [filterValues, setFilterValues] = useState({
     from: "",
     to: "",
-    activity: "all",
+    stock: "all",
     status: "all",
     keyword: "",
   });
@@ -119,6 +186,11 @@ const ProductsList = () => {
   });
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [pendingDeleteRows, setPendingDeleteRows] = useState([]);
+  const showToast = useToastStore((state) => state.showToast);
+
+  useEffect(() => {
+    setProducts(apiProducts);
+  }, [apiProducts]);
 
   const filteredProducts = useMemo(() => {
     const searchQuery = search.trim().toLowerCase();
@@ -129,9 +201,9 @@ const ProductsList = () => {
       filterValues.status && filterValues.status !== "all"
         ? filterValues.status.toLowerCase()
         : "";
-    const activityFilter =
-      filterValues.activity && filterValues.activity !== "all"
-        ? filterValues.activity.toLowerCase()
+    const stockFilter =
+      filterValues.stock && filterValues.stock !== "all"
+        ? filterValues.stock.toLowerCase()
         : "";
     const fromDate = filterValues.from ? new Date(filterValues.from) : null;
     const toDate = filterValues.to ? new Date(filterValues.to) : null;
@@ -142,9 +214,9 @@ const ProductsList = () => {
       const status = product.status?.toLowerCase() ?? "";
 
       if (statusFilter && status !== statusFilter) return false;
-      if (activityFilter) {
-        const activity = product.activity?.toLowerCase() ?? "";
-        if (activity !== activityFilter) return false;
+      if (stockFilter) {
+        const stock = product.stock?.toLowerCase() ?? "";
+        if (stock !== stockFilter) return false;
       }
 
       if (fromDate || toDate) {
@@ -255,6 +327,64 @@ const ProductsList = () => {
       ? `le produit "${pendingDeleteRows[0]?.product ?? ""}"`
       : `les ${pendingDeleteRows.length} produits sélectionnés`;
 
+  const exportColumns = useMemo(
+    () =>
+      productsColumns.filter(
+        (column) =>
+          column.accessor &&
+          column.header &&
+          column.header.toLowerCase() !== "avatar"
+      ),
+    []
+  );
+
+  const handleExport = (item) => {
+    const exportRows = sortedProducts;
+    const timestamp = new Date().toISOString().slice(0, 10);
+
+    if (item?.id === "csv") {
+      const csv = "\uFEFF" + buildCsvContent(exportRows, exportColumns);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      downloadBlob(blob, `neopharma-export-${timestamp}.csv`);
+      return;
+    }
+
+    if (item?.id === "excel") {
+      const tableHtml = buildHtmlTable(exportRows, exportColumns);
+      const blob = new Blob(["\uFEFF" + tableHtml], {
+        type: "application/vnd.ms-excel;charset=utf-8;",
+      });
+      downloadBlob(blob, `neopharma-export-${timestamp}.xls`);
+      return;
+    }
+
+    if (item?.id === "pdf") {
+      const tableHtml = buildHtmlTable(exportRows, exportColumns);
+      const printWindow = window.open("", "_blank", "noopener,noreferrer");
+      if (!printWindow) return;
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Export NeoPharma</title>
+            <style>
+              body { font-family: "Poppins", Arial, sans-serif; padding: 24px; }
+              table { width: 100%; border-collapse: collapse; }
+              th, td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 12px; }
+              th { background: #f3f4f6; text-align: left; }
+            </style>
+          </head>
+          <body>
+            <h2>Export NeoPharma</h2>
+            ${tableHtml}
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    }
+  };
+
   return (
     <>
       <DataTable
@@ -262,6 +392,8 @@ const ProductsList = () => {
         description="Tous les produits dans le système"
         columns={productsColumns}
         data={pagedProducts}
+        emptyMessage={loading ? "Chargement..." : "Aucune donnee"}
+        tableMaxHeightClass={tableMaxHeightClass}
         searchInput={{
           name: "search",
           value: search,
@@ -271,6 +403,7 @@ const ProductsList = () => {
         }}
         onFilterSelect={setFilterValues}
         onSortSelect={setSortValues}
+        onExportSelect={handleExport}
         actionsHeader="Action"
         renderActions={() => (
           <DropdownAction
@@ -317,11 +450,35 @@ const ProductsList = () => {
           setIsDeleteModalOpen(false);
           setPendingDeleteRows([]);
         }}
-        onConfirm={() => {
-          const selectedIds = new Set(pendingDeleteRows.map((row) => row.id));
-          setProducts((prev) => prev.filter((row) => !selectedIds.has(row.id)));
-          setIsDeleteModalOpen(false);
-          setPendingDeleteRows([]);
+        onConfirm={async () => {
+          const selectedIds = pendingDeleteRows.map((row) => row.id);
+          const deletedCount = pendingDeleteRows.length;
+          const deletedName =
+            deletedCount === 1 ? pendingDeleteRows[0]?.product ?? "" : "";
+          try {
+            await Promise.all(
+              selectedIds.map((id) => apiDelete(`/api/products/${id}`))
+            );
+            showToast({
+              title: "Suppression",
+              message:
+                deletedCount === 1
+                  ? `Le produit "${deletedName}" a ete supprime.`
+                  : `${deletedCount} produits ont ete supprimes.`,
+              variant: "danger",
+              duration: 3200,
+            });
+            refresh();
+          } catch (error) {
+            showToast({
+              title: "Erreur",
+              message: error.message || "Impossible de supprimer.",
+              variant: "danger",
+            });
+          } finally {
+            setIsDeleteModalOpen(false);
+            setPendingDeleteRows([]);
+          }
         }}
       />
     </>
@@ -329,3 +486,4 @@ const ProductsList = () => {
 };
 
 export default ProductsList;
+

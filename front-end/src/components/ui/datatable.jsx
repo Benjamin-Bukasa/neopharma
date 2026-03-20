@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Download, Trash2, FileSpreadsheet, FileBraces, FileText } from "lucide-react";
 import Button from "./button";
 import Input from "./input";
 import DropdownFilter from "./dropdownFilter";
 import DropdownSort from "./dropdownSort";
+import DropdownAction from "./dropdownAction";
 
 const resolveAccessor = (row, accessor) => {
   if (typeof accessor === "function") return accessor(row);
@@ -35,6 +36,11 @@ const DataTable = ({
   onSortSelect,
   filterLabel,
   sortLabel,
+  exportItems,
+  exportLabel = "Exporter",
+  onExportSelect,
+  exportButtonClassName = "",
+  tableMaxHeightClass = "",
   pageSizeSelect,
   pagination,
 }) => {
@@ -79,6 +85,14 @@ const DataTable = ({
 
   const showActions = typeof renderActions === "function";
   const showSelection = enableSelection;
+  const resolvedExportItems =
+    exportItems?.length
+      ? exportItems
+      : [
+          { id: "excel", label: <><div className="flex items-center justify-between gap-2"><FileSpreadsheet size={16} strokeWidth={1.5} /><p>Excel</p></div></> },
+          { id: "csv", label: <><div className="flex items-center justify-between gap-2"><FileBraces size={16} strokeWidth={1.5} /><p>CSV</p></div></> },
+          { id: "pdf", label: <><div className="flex items-center justify-between gap-2"><FileText size={16} strokeWidth={1.5} /><p>PDF</p></div></> },
+        ];
   const getPaginationItems = (current, total) => {
     if (total <= 5) {
       return Array.from({ length: total }, (_, i) => ({
@@ -116,7 +130,7 @@ const DataTable = ({
         <div className="">
           {title ? <h3 className="text-xl font-semibold">{title}</h3> : null}
           {description ? (
-            <p className="text-sm text-gray-500">{description}</p>
+            <p className="text-sm text-text-secondary">{description}</p>
           ) : null}
           <div className="flex items-center justify-end gap-4">
             {searchInput ? (
@@ -146,11 +160,27 @@ const DataTable = ({
               items={sortItems}
               onApply={onSortSelect}
             />
+            <DropdownAction
+              label={
+                <div className="flex items-center gap-2">
+                  <span>{exportLabel}</span>
+                  <Download size={18} strokeWidth={1.5} />
+                </div>
+              }
+              items={resolvedExportItems}
+              onSelect={(item) => onExportSelect?.(item)}
+              buttonClassName={[
+                "px-4 py-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
+                "bg-neutral-300 text-text-primary focus:ring-neutral-400",
+                "dark:bg-surface dark:text-text-primary dark:border dark:border-border dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50 dark:focus:border-neutral-600/60",
+                exportButtonClassName,
+              ].join(" ")}
+            />
             {pageSizeSelect ? (
-              <label className="flex items-center gap-2 text-sm text-gray-500">
+              <label className="flex items-center gap-2 text-sm text-text-secondary">
                 {pageSizeSelect.label ?? "Afficher"}
                 <select
-                  className="rounded-md border border-gray-300 px-2 py-1 text-sm outline-none "
+                  className="rounded-md border border-border bg-surface px-2 py-1 text-sm outline-none text-text-primary"
                   value={pageSizeSelect.value}
                   onChange={(event) =>
                     pageSizeSelect.onChange?.(Number(event.target.value))
@@ -197,7 +227,8 @@ const DataTable = ({
 
        <div
         className={[
-          "table-scroll mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-gray-200",
+          "table-scroll mt-4 overflow-y-auto rounded-xl border border-border bg-surface",
+          tableMaxHeightClass,
           tableContainerClassName,
         ].join(" ")}
       >
@@ -207,14 +238,14 @@ const DataTable = ({
             tableClassName,
         ].join(" ")}
         >
-        <thead className="sticky top-0 z-10 bg-[#b0bbb7]">
+        <thead className="sticky top-0 z-10 bg-[#b0bbb7] dark:bg-[#1D473F]">
           <tr>
             {showSelection ? (
-              <th className="border-0 border-b border-gray-200 px-4 py-4 text-left w-10">
+              <th className="border-0 border-b border-border px-4 py-4 text-left w-10">
                 <input
                   ref={headerCheckboxRef}
                   type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary accent-primary"
+                  className="h-4 w-4 rounded border-border bg-surface text-primary focus:ring-primary accent-primary"
                   checked={allSelected}
                   onChange={() => {
                     setSelectedKeys(() =>
@@ -229,7 +260,7 @@ const DataTable = ({
               <th
                 key={column.key ?? column.accessor ?? column.header}
                 className={[
-                    "border-0 border-b border-gray-200 px-4 py-4 text-left",
+                    "border-0 border-b border-border px-4 py-4 text-left",
                     headerClassName,
                     column.headerClassName ?? "",
                 ].join(" ")}
@@ -238,7 +269,7 @@ const DataTable = ({
               </th>
             ))}
             {showActions ? (
-              <th className="border-0 border-b border-gray-200 px-4 py-4 text-left">
+              <th className="border-0 border-b border-border px-4 py-4 text-left">
                 {actionsHeader}
               </th>
             ) : null}
@@ -249,7 +280,7 @@ const DataTable = ({
           {data.length === 0 ? (
             <tr>
               <td
-                className="border-b border-gray-200 px-4 py-6 text-center text-sm text-gray-500"
+                className="border-b border-border px-4 py-6 text-center text-sm text-text-secondary"
                 colSpan={columns.length + (showActions ? 1 : 0)}
                 >
                 {emptyMessage}
@@ -260,7 +291,7 @@ const DataTable = ({
               <tr
                 key={getRowKey(row, index)}
                 className={[
-                  "border-b border-gray-200 hover:bg-gray-50",
+                  "border-b border-border hover:bg-surface/70",
                   rowClassName,
                 ].join(" ")}
               >
@@ -268,7 +299,7 @@ const DataTable = ({
                   <td className="border-0 px-4 py-2">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary accent-primary"
+                      className="h-4 w-4 rounded border-border bg-surface text-primary focus:ring-primary accent-primary"
                       checked={selectedKeys.has(getRowKey(row, index))}
                       onChange={() => {
                         const key = getRowKey(row, index);
@@ -313,65 +344,64 @@ const DataTable = ({
       </div>
 
       {pagination ? (
-  <div className="w-full flex items-center justify-between">
-    <div className="text-center text-sm text-gray-500 mt-2">
-      {pagination.label ??
-        `Page ${pagination.page ?? 1} sur ${pagination.totalPages ?? 1}`}
-    </div>
-    <div className="flex justify-center gap-2 mt-4 flex-wrap">
-      {getPaginationItems(
-        pagination.page ?? 1,
-        pagination.totalPages ?? 1
-      ).map((item) => {
-        if (item.type === "ellipsis") {
-          return (
-            <button
-              key={item.key}
-              type="button"
-              disabled
-              className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-gray-100 text-gray-400 cursor-default"
-            >
-              ...
-            </button>
-          );
-        }
+        <div className="w-full flex items-center justify-between">
+          <div className="text-center text-sm text-text-secondary mt-2">
+            {pagination.label ??
+              `Page ${pagination.page ?? 1} sur ${pagination.totalPages ?? 1}`}
+          </div>
+          <div className="flex justify-center gap-2 mt-4 flex-wrap">
+            {getPaginationItems(
+              pagination.page ?? 1,
+              pagination.totalPages ?? 1
+            ).map((item) => {
+              if (item.type === "ellipsis") {
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    disabled
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-surface/80 text-text-secondary border-border cursor-default"
+                  >
+                    ...
+                  </button>
+                );
+              }
 
-        const isActive = item.value === (pagination.page ?? 1);
-        return (
-          <button
-            key={item.value}
-            type="button"
-            onClick={() => {
-              if (isActive) return;
-              if (typeof pagination.onPageChange === "function") {
-                pagination.onPageChange(item.value);
-                return;
-              }
-              if (item.value < (pagination.page ?? 1)) {
-                pagination.onPrev?.();
-                return;
-              }
-              if (item.value > (pagination.page ?? 1)) {
-                pagination.onNext?.();
-              }
-            }}
-            className={[
-              "px-3 py-1.5 rounded-lg text-sm font-medium border",
-              isActive
-                ? "bg-[#b0bbb7] text-text-primary border-[#b0bbb7]"
-                : "bg-gray-200 text-gray-800 border-gray-200 hover:bg-gray-300",
-            ].join(" ")}
-          >
-            {item.value}
-          </button>
-        );
-      })}
-    </div>
-  </div>
-) : null}
+              const isActive = item.value === (pagination.page ?? 1);
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => {
+                    if (isActive) return;
+                    if (typeof pagination.onPageChange === "function") {
+                      pagination.onPageChange(item.value);
+                      return;
+                    }
+                    if (item.value < (pagination.page ?? 1)) {
+                      pagination.onPrev?.();
+                      return;
+                    }
+                    if (item.value > (pagination.page ?? 1)) {
+                      pagination.onNext?.();
+                    }
+                  }}
+                  className={[
+                    "px-3 py-1.5 rounded-lg text-sm font-medium border",
+                    isActive
+                      ? "bg-[#b0bbb7] text-text-primary border-[#b0bbb7] dark:bg-[#1D473F] dark:text-white dark:border-[#1D473F]"
+                      : "bg-surface text-text-primary border-border hover:bg-surface/70 dark:bg-surface/70 dark:text-text-primary",
+                  ].join(" ")}
+                >
+                  {item.value}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
 
 export default DataTable;
-
