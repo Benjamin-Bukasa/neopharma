@@ -107,6 +107,14 @@ const buildHtmlTable = (rows, columns, title) => {
   `;
 };
 
+const THEME_COLORS = {
+  border: "rgb(var(--border))",
+  primary: "rgb(var(--primary))",
+  secondary: "rgb(var(--secondary))",
+  accent: "rgb(var(--accent))",
+  header: "rgb(var(--header))",
+};
+
 const StackedBarChart = ({ data }) => {
   const total = data.reduce((acc, item) => acc + item.value, 0) || 1;
   return (
@@ -152,7 +160,7 @@ const DonutChart = ({ data, size = 160, centerLabel }) => {
         cy="18"
         r={radius}
         fill="none"
-        stroke="#E5E7EB"
+        stroke={THEME_COLORS.border}
         strokeWidth={stroke}
       />
       {data.map((item) => {
@@ -182,7 +190,7 @@ const DonutChart = ({ data, size = 160, centerLabel }) => {
           textAnchor="middle"
           dominantBaseline="middle"
           fontSize="4"
-          fill="#1D473F"
+          fill={THEME_COLORS.secondary}
         >
           {centerLabel}
         </text>
@@ -191,7 +199,7 @@ const DonutChart = ({ data, size = 160, centerLabel }) => {
   );
 };
 
-const AreaChart = ({ data, color = "#1D473F" }) => {
+const AreaChart = ({ data, color = THEME_COLORS.secondary }) => {
   const maxValue = Math.max(...data.map((item) => item.value), 1);
   const width = 210;
   const height = 80;
@@ -230,7 +238,7 @@ const AreaChart = ({ data, color = "#1D473F" }) => {
   );
 };
 
-const SparklineArea = ({ data, color = "#1D473F" }) => {
+const SparklineArea = ({ data, color = THEME_COLORS.secondary }) => {
   const maxValue = Math.max(...data, 1);
   const width = 210;
   const height = 60;
@@ -289,14 +297,14 @@ const DualLineChart = ({ data }) => {
     <svg width="100%" height="120" viewBox={`0 0 ${width} ${height}`}>
       <polyline
         fill="none"
-        stroke="#1D473F"
+        stroke={THEME_COLORS.secondary}
         strokeWidth="3"
         points={inPoints}
         strokeLinecap="round"
       />
       <polyline
         fill="none"
-        stroke="#b0bbb7"
+        stroke={THEME_COLORS.header}
         strokeWidth="3"
         points={outPoints}
         strokeLinecap="round"
@@ -307,8 +315,8 @@ const DualLineChart = ({ data }) => {
         const yOut = height - (item.out / maxValue) * (height - 10) - 5;
         return (
           <g key={item.label}>
-            <circle cx={x} cy={yIn} r="3" fill="#1D473F" />
-            <circle cx={x} cy={yOut} r="3" fill="#b0bbb7" />
+            <circle cx={x} cy={yIn} r="3" fill={THEME_COLORS.secondary} />
+            <circle cx={x} cy={yOut} r="3" fill={THEME_COLORS.header} />
           </g>
         );
       })}
@@ -392,10 +400,10 @@ function Reports() {
     const pending = Math.max(total - paid - canceled - failed, 0);
 
     return [
-      { label: "Réussies", value: paid, color: "#1D473F" },
+      { label: "Réussies", value: paid, color: THEME_COLORS.secondary },
       { label: "Annulées", value: canceled, color: "#F59E0B" },
       { label: "Échouées", value: failed, color: "#EF4444" },
-      { label: "En attente", value: pending, color: "#b0bbb7" },
+      { label: "En attente", value: pending, color: THEME_COLORS.header },
     ];
   }, [orders, paidOrders.length]);
 
@@ -431,17 +439,17 @@ function Reports() {
       {
         label: "Cash",
         value: getPercent(counts.CASH || 0),
-        color: "#1D473F",
+        color: THEME_COLORS.secondary,
       },
       {
         label: "Mobile Money",
         value: getPercent(counts.MOBILE_MONEY || 0),
-        color: "#D8F274",
+        color: THEME_COLORS.accent,
       },
       {
         label: "Carte",
         value: getPercent(counts.CARD || 0),
-        color: "#b0bbb7",
+        color: THEME_COLORS.header,
       },
     ];
   }, [orders]);
@@ -637,7 +645,7 @@ function Reports() {
           }
           variant="default"
           size="default"
-          className="w-full bg-neutral-300 text-text-primary hover:bg-neutral-300/80 sm:w-auto"
+          className="w-full bg-background text-text-primary hover:bg-surface sm:w-auto"
           onClick={downloadExcel}
         />
       </div>
@@ -692,7 +700,7 @@ function Reports() {
             <p className="text-xs font-semibold uppercase text-text-secondary">
               Quantité vendue (7 jours)
             </p>
-            <AreaChart data={salesQuantityData} color="#1D473F" />
+            <AreaChart data={salesQuantityData} color={THEME_COLORS.secondary} />
           </div>
         </div>
 
@@ -747,13 +755,13 @@ function Reports() {
               <p className="text-xs font-semibold uppercase text-text-secondary">
                 Commandes
               </p>
-              <SparklineArea data={ordersTrend} color="#1D473F" />
+              <SparklineArea data={ordersTrend} color={THEME_COLORS.secondary} />
             </div>
             <div>
               <p className="text-xs font-semibold uppercase text-text-secondary">
                 Clients
               </p>
-              <SparklineArea data={clientTrend} color="#b0bbb7" />
+              <SparklineArea data={clientTrend} color={THEME_COLORS.header} />
             </div>
           </div>
         </div>
@@ -775,7 +783,7 @@ function Reports() {
               Entrées
             </span>
             <span className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#b0bbb7]" />
+              <span className="h-2 w-2 rounded-full bg-header" />
               Sorties
             </span>
           </div>

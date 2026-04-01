@@ -4,6 +4,10 @@ const {
   getCurrencyCodeMap,
 } = require("../utils/moneyCurrency");
 const {
+  attachPaymentOriginalDetails,
+  getPaymentOriginalMap,
+} = require("../utils/paymentOriginalStore");
+const {
   parseListParams,
   buildOrderBy,
   contains,
@@ -33,8 +37,15 @@ const hydratePaymentsWithCurrencyCodes = async (records) => {
     "orders",
     list.map((item) => item.orderId),
   );
+  const paymentOriginalMap = await getPaymentOriginalMap(
+    prisma,
+    list.map((item) => item.id),
+  );
 
-  const hydrated = attachCurrencyCodes(list, paymentCurrencyMap).map((payment) => ({
+  const hydrated = attachPaymentOriginalDetails(
+    attachCurrencyCodes(list, paymentCurrencyMap),
+    paymentOriginalMap,
+  ).map((payment) => ({
     ...payment,
     order: payment.order
       ? {

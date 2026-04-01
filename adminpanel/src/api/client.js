@@ -1,4 +1,5 @@
 import { translateMessage } from "../utils/translateMessage";
+import useAuthStore from "../stores/authStore";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
 
@@ -30,19 +31,56 @@ const parseJson = async (response) => {
   }
 };
 
+let refreshPromise = null;
+
+const refreshAccessToken = async () => {
+  if (!refreshPromise) {
+    const auth = useAuthStore.getState();
+    refreshPromise = auth
+      .refreshSession()
+      .catch(async (error) => {
+        await useAuthStore.getState().logout();
+        throw error;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+};
+
+const performRequest = async (
+  buildResponse,
+  { token, retryOn401 = true } = {},
+) => {
+  const response = await buildResponse(token);
+
+  if (response.status !== 401 || !retryOn401 || !token) {
+    return response;
+  }
+
+  const refreshed = await refreshAccessToken();
+  return buildResponse(refreshed.accessToken);
+};
+
 export const requestJson = async (
   path,
-  { method = "GET", token, headers = {}, body, query } = {},
+  { method = "GET", token, headers = {}, body, query, retryOn401 = true } = {},
 ) => {
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const response = await performRequest(
+    (activeToken) =>
+      fetch(buildUrl(path, query), {
+        method,
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+          ...(body ? { "Content-Type": "application/json" } : {}),
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    { token, retryOn401 },
+  );
 
   const payload = await parseJson(response);
 
@@ -59,17 +97,21 @@ export const requestJson = async (
 
 export const requestBlob = async (
   path,
-  { method = "GET", token, headers = {}, body, query } = {},
+  { method = "GET", token, headers = {}, body, query, retryOn401 = true } = {},
 ) => {
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const response = await performRequest(
+    (activeToken) =>
+      fetch(buildUrl(path, query), {
+        method,
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+          ...(body ? { "Content-Type": "application/json" } : {}),
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    { token, retryOn401 },
+  );
 
   if (!response.ok) {
     const payload = await parseJson(response);
@@ -85,16 +127,20 @@ export const requestBlob = async (
 
 export const requestFormData = async (
   path,
-  { method = "POST", token, headers = {}, formData, query } = {},
+  { method = "POST", token, headers = {}, formData, query, retryOn401 = true } = {},
 ) => {
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    body: formData,
-  });
+  const response = await performRequest(
+    (activeToken) =>
+      fetch(buildUrl(path, query), {
+        method,
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+          ...headers,
+        },
+        body: formData,
+      }),
+    { token, retryOn401 },
+  );
 
   const payload = await parseJson(response);
 

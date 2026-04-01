@@ -5,6 +5,7 @@ const TABLES = {
   supplyRequests: '"supplyRequests"',
   purchaseOrders: '"purchaseOrders"',
   productTransferts: '"productTransferts"',
+  inventorySessions: '"inventorySessions"',
 };
 
 const escapeSqlValue = (value) => `'${String(value).replace(/'/g, "''")}'`;

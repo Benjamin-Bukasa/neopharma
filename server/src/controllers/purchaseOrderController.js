@@ -16,6 +16,53 @@ const { sendExport } = require("../utils/exporter");
 const { emitToStore, emitToTenant } = require("../socket");
 const { buildPurchaseOrderPdf } = require("../services/purchaseOrderPdf");
 const { generateNextDocumentCode } = require("../utils/documentCodeStore");
+const {
+  getDocumentApprovalMap,
+  getDocumentApprovals,
+  prepareDocumentApprovals,
+  decideDocumentApproval,
+} = require("../utils/documentApprovalStore");
+
+const PURCHASE_ORDER_DOCUMENT_TYPE = "PURCHASE_ORDER";
+const PURCHASE_ORDER_FLOW_CODE = "PURCHASE_ORDER";
+
+const mapPurchaseOrderStatus = (rawStatus, approvals = []) => {
+  if (!approvals.length) return rawStatus;
+  if (approvals.some((item) => item.status === "REJECTED")) return "REJECTED";
+  if (rawStatus === "SENT" || rawStatus === "PARTIAL" || rawStatus === "COMPLETED" || rawStatus === "CANCELED") {
+    return rawStatus;
+  }
+  return "SUBMITTED";
+};
+
+const decoratePurchaseOrdersWithApprovals = async (records, { includeApprovals = true } = {}) => {
+  const list = Array.isArray(records) ? records.filter(Boolean) : records ? [records] : [];
+  if (!list.length) return Array.isArray(records) ? [] : records;
+
+  const approvalMap = await getDocumentApprovalMap(
+    list[0].tenantId,
+    PURCHASE_ORDER_DOCUMENT_TYPE,
+    list.map((item) => item.id),
+  );
+
+  const mapped = list.map((item) => {
+    const approvals = approvalMap.get(item.id) || [];
+    return {
+      ...item,
+      rawStatus: item.status,
+      status: mapPurchaseOrderStatus(item.status, approvals),
+      ...(includeApprovals ? { approvals } : {}),
+    };
+  });
+
+  return Array.isArray(records) ? mapped : mapped[0];
+};
+
+const canModifyPurchaseOrder = async (tenantId, order) => {
+  if (order.status !== "DRAFT") return false;
+  const approvals = await getDocumentApprovals(tenantId, PURCHASE_ORDER_DOCUMENT_TYPE, order.id);
+  return !approvals.length || approvals.some((item) => item.status === "REJECTED");
+};
 
 const hydratePurchaseOrdersWithCurrencyCodes = async (records) => {
   const list = Array.isArray(records)
@@ -223,7 +270,11 @@ const listPurchaseOrders = async (req, res) => {
       },
       orderBy,
     });
-    return res.json(await hydratePurchaseOrdersWithCurrencyCodes(orders));
+    return res.json(
+      await decoratePurchaseOrdersWithApprovals(
+        await hydratePurchaseOrdersWithCurrencyCodes(orders),
+      ),
+    );
   }
 
   const [total, orders] = await prisma.$transaction([
@@ -244,7 +295,9 @@ const listPurchaseOrders = async (req, res) => {
   ]);
 
   return res.json({
-    data: await hydratePurchaseOrdersWithCurrencyCodes(orders),
+    data: await decoratePurchaseOrdersWithApprovals(
+      await hydratePurchaseOrdersWithCurrencyCodes(orders),
+    ),
     meta: buildMeta({ page, pageSize, total, sortBy, sortDir }),
   });
 };
@@ -268,7 +321,11 @@ const getPurchaseOrder = async (req, res) => {
     return res.status(404).json({ message: "Purchase order not found." });
   }
 
-  return res.json(await hydratePurchaseOrdersWithCurrencyCodes(order));
+  return res.json(
+    await decoratePurchaseOrdersWithApprovals(
+      await hydratePurchaseOrdersWithCurrencyCodes(order),
+    ),
+  );
 };
 
 const getPurchaseOrderPdf = async (req, res) => {
@@ -329,12 +386,39 @@ const sendPurchaseOrder = async (req, res) => {
     return res.status(400).json({ message: "Purchase order has no items." });
   }
 
-  const updated = await prisma.purchaseOrder.update({
-    where: { id },
-    data: { status: "SENT" },
+  const approvalSession = await prepareDocumentApprovals({
+    tenantId: req.user.tenantId,
+    documentType: PURCHASE_ORDER_DOCUMENT_TYPE,
+    documentId: id,
+    flowCodes: [PURCHASE_ORDER_FLOW_CODE],
   });
 
-  if (updated.storeId) {
+  let updated;
+  if (!approvalSession.approvals.length) {
+    updated = await prisma.purchaseOrder.update({
+      where: { id },
+      data: { status: "SENT" },
+    });
+  } else {
+    updated = order;
+  }
+
+  if (approvalSession.approvals.length) {
+    if (order.storeId) {
+      emitToStore(order.storeId, "purchase:order:submitted", {
+        id: order.id,
+        status: "SUBMITTED",
+        storeId: order.storeId,
+        code: order.code,
+      });
+    } else {
+      emitToTenant(req.user.tenantId, "purchase:order:submitted", {
+        id: order.id,
+        status: "SUBMITTED",
+        code: order.code,
+      });
+    }
+  } else if (updated.storeId) {
     emitToStore(updated.storeId, "purchase:order:sent", {
       id: updated.id,
       status: updated.status,
@@ -349,7 +433,153 @@ const sendPurchaseOrder = async (req, res) => {
     });
   }
 
-  return res.json(updated);
+  const refreshed = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId: req.user.tenantId },
+    include: {
+      items: { include: { product: true, unit: true } },
+      supplier: true,
+      store: true,
+      purchaseRequest: true,
+      orderedBy: true,
+      deliveryNotes: true,
+    },
+  });
+
+  return res.json(
+    await decoratePurchaseOrdersWithApprovals(
+      await hydratePurchaseOrdersWithCurrencyCodes(refreshed),
+    ),
+  );
+};
+
+const approvePurchaseOrder = async (req, res) => {
+  const { id } = req.params;
+  const note = req.body?.note || null;
+
+  const order = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId: req.user.tenantId },
+    include: {
+      items: { include: { product: true, unit: true } },
+      supplier: true,
+      store: true,
+      purchaseRequest: true,
+      orderedBy: true,
+      deliveryNotes: true,
+    },
+  });
+
+  if (!order) {
+    return res.status(404).json({ message: "Purchase order not found." });
+  }
+
+  try {
+    const decision = await decideDocumentApproval({
+      tenantId: req.user.tenantId,
+      documentType: PURCHASE_ORDER_DOCUMENT_TYPE,
+      documentId: id,
+      user: req.user,
+      decision: "APPROVED",
+      note,
+    });
+
+    let updated = order;
+    if (decision.lifecycleStatus === "APPROVED" && order.status !== "SENT") {
+      updated = await prisma.purchaseOrder.update({
+        where: { id },
+        data: { status: "SENT" },
+        include: {
+          items: { include: { product: true, unit: true } },
+          supplier: true,
+          store: true,
+          purchaseRequest: true,
+          orderedBy: true,
+          deliveryNotes: true,
+        },
+      });
+
+      if (updated.storeId) {
+        emitToStore(updated.storeId, "purchase:order:sent", {
+          id: updated.id,
+          status: updated.status,
+          storeId: updated.storeId,
+          code: updated.code,
+        });
+      } else {
+        emitToTenant(req.user.tenantId, "purchase:order:sent", {
+          id: updated.id,
+          status: updated.status,
+          code: updated.code,
+        });
+      }
+    }
+
+    return res.json(
+      await decoratePurchaseOrdersWithApprovals(
+        await hydratePurchaseOrdersWithCurrencyCodes(updated),
+      ),
+    );
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de valider cette commande.",
+    });
+  }
+};
+
+const rejectPurchaseOrder = async (req, res) => {
+  const { id } = req.params;
+  const note = req.body?.note || null;
+
+  const order = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId: req.user.tenantId },
+    include: {
+      items: { include: { product: true, unit: true } },
+      supplier: true,
+      store: true,
+      purchaseRequest: true,
+      orderedBy: true,
+      deliveryNotes: true,
+    },
+  });
+
+  if (!order) {
+    return res.status(404).json({ message: "Purchase order not found." });
+  }
+
+  try {
+    await decideDocumentApproval({
+      tenantId: req.user.tenantId,
+      documentType: PURCHASE_ORDER_DOCUMENT_TYPE,
+      documentId: id,
+      user: req.user,
+      decision: "REJECTED",
+      note,
+    });
+
+    if (order.storeId) {
+      emitToStore(order.storeId, "purchase:order:rejected", {
+        id: order.id,
+        status: "REJECTED",
+        storeId: order.storeId,
+        code: order.code,
+      });
+    } else {
+      emitToTenant(req.user.tenantId, "purchase:order:rejected", {
+        id: order.id,
+        status: "REJECTED",
+        code: order.code,
+      });
+    }
+
+    return res.json(
+      await decoratePurchaseOrdersWithApprovals(
+        await hydratePurchaseOrdersWithCurrencyCodes(order),
+      ),
+    );
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de rejeter cette commande.",
+    });
+  }
 };
 
 const updatePurchaseOrder = async (req, res) => {
@@ -373,7 +603,7 @@ const updatePurchaseOrder = async (req, res) => {
     return res.status(404).json({ message: "Purchase order not found." });
   }
 
-  if (order.status !== "DRAFT") {
+  if (!(await canModifyPurchaseOrder(req.user.tenantId, order))) {
     return res.status(400).json({ message: "Only draft orders can be edited." });
   }
 
@@ -462,13 +692,15 @@ const updatePurchaseOrder = async (req, res) => {
     data: { status: "ORDERED" },
   });
 
-  return res.json({
-    ...updated,
-    items: (updated.items || []).map((item) => ({
-      ...item,
-      currencyCode: currencySettings.primaryCurrencyCode,
-    })),
-  });
+  return res.json(
+    await decoratePurchaseOrdersWithApprovals({
+      ...updated,
+      items: (updated.items || []).map((item) => ({
+        ...item,
+        currencyCode: currencySettings.primaryCurrencyCode,
+      })),
+    }),
+  );
 };
 
 const deletePurchaseOrder = async (req, res) => {
@@ -482,7 +714,7 @@ const deletePurchaseOrder = async (req, res) => {
     return res.status(404).json({ message: "Purchase order not found." });
   }
 
-  if (order.status !== "DRAFT") {
+  if (!(await canModifyPurchaseOrder(req.user.tenantId, order))) {
     return res.status(400).json({ message: "Only draft orders can be deleted." });
   }
 
@@ -504,6 +736,8 @@ module.exports = {
   getPurchaseOrder,
   getPurchaseOrderPdf,
   sendPurchaseOrder,
+  approvePurchaseOrder,
+  rejectPurchaseOrder,
   updatePurchaseOrder,
   deletePurchaseOrder,
 };

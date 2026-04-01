@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CreditCard,
   DollarSign,
@@ -12,12 +12,26 @@ import useToastStore from "../../stores/toastStore";
 import { formatName } from "../../utils/formatters";
 import {
   buildSecondaryRateLabel,
+  convertCurrencyAmount,
+  convertToPrimaryAmount,
   formatConvertedPrimaryAmount,
+  formatCurrencyAmount,
   formatPrimaryAmount,
   formatSecondaryAmount,
   hasSecondaryCurrency,
-  convertToPrimaryAmount,
 } from "../../utils/currency";
+
+const formatEditableAmount = (value) => {
+  const numericValue = Number(value || 0);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  return numericValue
+    .toFixed(2)
+    .replace(/\.00$/, "")
+    .replace(/(\.\d*[1-9])0+$/, "$1");
+};
 
 const PaymentModal = ({
   isOpen,
@@ -25,10 +39,15 @@ const PaymentModal = ({
   cartItems = [],
   totalAmount = 0,
   currencySettings,
+  cashSession = null,
   onConfirm,
 }) => {
   const [method, setMethod] = useState("cash");
   const [amount, setAmount] = useState("");
+  const [amountDirty, setAmountDirty] = useState(false);
+  const [paymentCurrencyCode, setPaymentCurrencyCode] = useState(
+    currencySettings?.primaryCurrencyCode || "USD",
+  );
   const [customerQuery, setCustomerQuery] = useState("");
   const [isCustomerMenuOpen, setIsCustomerMenuOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -73,50 +92,172 @@ const PaymentModal = ({
     try {
       const program = await apiGet("/api/customer-bonus-programs/current");
       setBonusProgram(program || null);
-    } catch (error) {
+    } catch (_error) {
       setBonusProgram(null);
     }
   }, []);
 
+  const primaryCurrencyCode = currencySettings?.primaryCurrencyCode || "USD";
+  const secondaryCurrencyCode = currencySettings?.secondaryCurrencyCode || "";
+  const secondaryEnabled = hasSecondaryCurrency(currencySettings);
+  const exchangeRateLabel = buildSecondaryRateLabel(currencySettings);
+
+  const resolvedTotalAmount = useMemo(() => {
+    const computed = cartItems.reduce(
+      (sum, item) =>
+        sum +
+        convertToPrimaryAmount(
+          item.price ?? 0,
+          item.currencyCode,
+          currencySettings,
+        ) *
+          Number(item.cartQty || 0),
+      0,
+    );
+
+    return computed > 0 ? computed : Number(totalAmount || 0);
+  }, [cartItems, currencySettings, totalAmount]);
+
   useEffect(() => {
     if (!isOpen) return;
-    setAmount(totalAmount ? totalAmount.toFixed(2) : "");
+    setMethod("cash");
+    setAmount(formatEditableAmount(resolvedTotalAmount));
+    setAmountDirty(false);
+    setPaymentCurrencyCode(primaryCurrencyCode);
     setCustomerQuery("");
     setSelectedCustomer(null);
     setIsCustomerMenuOpen(false);
-    setMethod("cash");
     setSubmitting(false);
     loadCustomers();
     loadBonusProgram();
-  }, [isOpen, loadBonusProgram, loadCustomers, totalAmount]);
+  }, [
+    isOpen,
+    loadBonusProgram,
+    loadCustomers,
+    primaryCurrencyCode,
+    resolvedTotalAmount,
+  ]);
 
-  const numericAmount = useMemo(() => {
-    const value = parseFloat(amount.replace(",", "."));
+  const inputAmount = useMemo(() => {
+    const value = parseFloat(String(amount || "").replace(",", "."));
     return Number.isNaN(value) ? 0 : value;
   }, [amount]);
 
-  const secondaryEnabled = hasSecondaryCurrency(currencySettings);
-  const exchangeRateLabel = buildSecondaryRateLabel(currencySettings);
-  const change = Math.max(0, numericAmount - totalAmount);
-  const primaryCurrencyCode = currencySettings?.primaryCurrencyCode || "USD";
-  const secondaryCurrencyCode = currencySettings?.secondaryCurrencyCode || "";
+  const normalizedPaymentCurrencyCode =
+    paymentCurrencyCode || primaryCurrencyCode;
+
+  const paymentCurrencyOptions = useMemo(() => {
+    const options = [
+      { code: primaryCurrencyCode, label: primaryCurrencyCode },
+    ];
+
+    if (secondaryEnabled && secondaryCurrencyCode && secondaryCurrencyCode !== primaryCurrencyCode) {
+      options.push({
+        code: secondaryCurrencyCode,
+        label: secondaryCurrencyCode,
+      });
+    }
+
+    return options;
+  }, [primaryCurrencyCode, secondaryCurrencyCode, secondaryEnabled]);
+
+  const receivedAmountPrimary = useMemo(
+    () =>
+      convertCurrencyAmount(
+        inputAmount,
+        normalizedPaymentCurrencyCode,
+        primaryCurrencyCode,
+        currencySettings,
+      ),
+    [currencySettings, inputAmount, normalizedPaymentCurrencyCode, primaryCurrencyCode],
+  );
+
+  const changePrimary = Math.max(0, receivedAmountPrimary - resolvedTotalAmount);
+  const changeInPaymentCurrency = useMemo(
+    () =>
+      convertCurrencyAmount(
+        changePrimary,
+        primaryCurrencyCode,
+        normalizedPaymentCurrencyCode,
+        currencySettings,
+      ),
+    [changePrimary, currencySettings, normalizedPaymentCurrencyCode, primaryCurrencyCode],
+  );
+
+  const amountEquivalentCurrencyCode = useMemo(() => {
+    if (normalizedPaymentCurrencyCode === primaryCurrencyCode) {
+      return secondaryEnabled ? secondaryCurrencyCode : "";
+    }
+
+    return primaryCurrencyCode;
+  }, [
+    normalizedPaymentCurrencyCode,
+    primaryCurrencyCode,
+    secondaryCurrencyCode,
+    secondaryEnabled,
+  ]);
+
+  const formatAmountEquivalent = useCallback(
+    (amountValue, sourceCurrencyCode) => {
+      if (!amountEquivalentCurrencyCode) return null;
+
+      if (sourceCurrencyCode === primaryCurrencyCode) {
+        return formatSecondaryAmount(amountValue, currencySettings, primaryCurrencyCode);
+      }
+
+      return formatPrimaryAmount(
+        convertCurrencyAmount(
+          amountValue,
+          sourceCurrencyCode,
+          primaryCurrencyCode,
+          currencySettings,
+        ),
+        currencySettings,
+      );
+    },
+    [amountEquivalentCurrencyCode, currencySettings, primaryCurrencyCode],
+  );
+
+  const canSubmitPayment =
+    Boolean(cashSession) && resolvedTotalAmount > 0 && !submitting;
+
   const pointsEarned = useMemo(() => {
-    if (!selectedCustomer || totalAmount <= 0) return 0;
+    if (!selectedCustomer || resolvedTotalAmount <= 0) return 0;
     const threshold = Number(bonusProgram?.amountThreshold || 0);
     const points = Number(bonusProgram?.pointsAwarded || 0);
-    if (Number.isFinite(threshold) && threshold > 0 && Number.isFinite(points) && points > 0) {
-      return Math.max(0, Math.floor(totalAmount / threshold) * Math.trunc(points));
+    if (
+      Number.isFinite(threshold) &&
+      threshold > 0 &&
+      Number.isFinite(points) &&
+      points > 0
+    ) {
+      return Math.max(
+        0,
+        Math.floor(resolvedTotalAmount / threshold) * Math.trunc(points),
+      );
     }
-    return Math.max(1, Math.floor(totalAmount / 10));
-  }, [bonusProgram, selectedCustomer, totalAmount]);
+    return Math.max(1, Math.floor(resolvedTotalAmount / 10));
+  }, [bonusProgram, selectedCustomer, resolvedTotalAmount]);
 
-  const keypad = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "<- "];
+  const keypad = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "<-"];
 
   const handleKey = (key) => {
-    if (key === "<- ") {
+    if (key === "<-") {
+      if (!amountDirty) {
+        setAmount("");
+        setAmountDirty(true);
+        return;
+      }
       setAmount((prev) => prev.slice(0, -1));
       return;
     }
+
+    if (!amountDirty) {
+      setAmount(key === "." ? "0." : key);
+      setAmountDirty(true);
+      return;
+    }
+
     if (key === "." && amount.includes(".")) return;
     setAmount((prev) => `${prev}${key}`);
   };
@@ -147,11 +288,46 @@ const PaymentModal = ({
     setIsCreateOpen(true);
   };
 
+  const handlePaymentCurrencyChange = (nextCurrencyCode) => {
+    if (!nextCurrencyCode || nextCurrencyCode === normalizedPaymentCurrencyCode) {
+      return;
+    }
+
+    const currentVisibleAmount = amountDirty
+      ? inputAmount
+      : convertCurrencyAmount(
+          resolvedTotalAmount,
+          primaryCurrencyCode,
+          normalizedPaymentCurrencyCode,
+          currencySettings,
+        );
+
+    const nextVisibleAmount = convertCurrencyAmount(
+      currentVisibleAmount,
+      normalizedPaymentCurrencyCode,
+      nextCurrencyCode,
+      currencySettings,
+    );
+
+    setPaymentCurrencyCode(nextCurrencyCode);
+    setAmount(formatEditableAmount(nextVisibleAmount));
+  };
+
   const handleSubmitPayment = async () => {
+    if (!cashSession) {
+      showToast({
+        title: "Caisse fermee",
+        message: "Ouvrez une caisse avant de valider une vente.",
+        variant: "warning",
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       await onConfirm?.({
-        amount: numericAmount,
+        amount: receivedAmountPrimary,
+        originalAmountReceived: inputAmount,
+        paymentCurrencyCode: normalizedPaymentCurrencyCode,
         method,
         customer: selectedCustomer,
         pointsEarned,
@@ -305,7 +481,7 @@ const PaymentModal = ({
                       <div>
                         <p className="font-medium text-text-primary">{item.product}</p>
                         <p className="text-xs text-text-secondary">
-                          {item.cartQty} x{" "}
+                          {item.cartQty} x {" "}
                           {formatConvertedPrimaryAmount(
                             item.price,
                             item.currencyCode,
@@ -314,7 +490,7 @@ const PaymentModal = ({
                         </p>
                         {secondaryEnabled ? (
                           <p className="text-[10px] text-text-secondary">
-                            {item.cartQty} x{" "}
+                            {item.cartQty} x {" "}
                             {formatSecondaryAmount(
                               item.price,
                               currencySettings,
@@ -341,50 +517,53 @@ const PaymentModal = ({
             </div>
 
             <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-text-secondary">
-                  Total ({primaryCurrencyCode})
-                </span>
+              {!cashSession ? (
+                <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  Aucune caisse ouverte. Ouvrez d'abord la caisse avant d'encaisser.
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-text-secondary">Total ({primaryCurrencyCode})</span>
                 <div className="flex flex-col items-end">
                   <span className="font-semibold text-text-primary">
-                    {formatPrimaryAmount(totalAmount, currencySettings)}
+                    {formatPrimaryAmount(resolvedTotalAmount, currencySettings)}
                   </span>
                   {secondaryEnabled ? (
                     <span className="text-[10px] text-text-secondary">
-                      Equivalent en {secondaryCurrencyCode}:{" "}
-                      {formatSecondaryAmount(totalAmount, currencySettings)}
+                      Equivalent en {secondaryCurrencyCode}: {" "}
+                      {formatSecondaryAmount(resolvedTotalAmount, currencySettings)}
                     </span>
                   ) : null}
                 </div>
               </div>
               <div className="mt-2 flex items-center justify-between text-sm">
                 <span className="text-text-secondary">
-                  Montant recu ({primaryCurrencyCode})
+                  Montant recu ({normalizedPaymentCurrencyCode})
                 </span>
                 <div className="flex flex-col items-end">
                   <span className="font-semibold text-text-primary">
-                    {formatPrimaryAmount(numericAmount, currencySettings)}
+                    {formatCurrencyAmount(inputAmount, normalizedPaymentCurrencyCode)}
                   </span>
-                  {secondaryEnabled ? (
+                  {amountEquivalentCurrencyCode ? (
                     <span className="text-[10px] text-text-secondary">
-                      Equivalent en {secondaryCurrencyCode}:{" "}
-                      {formatSecondaryAmount(numericAmount, currencySettings)}
+                      Equivalent en {amountEquivalentCurrencyCode}: {" "}
+                      {formatAmountEquivalent(inputAmount, normalizedPaymentCurrencyCode)}
                     </span>
                   ) : null}
                 </div>
               </div>
               <div className="mt-2 flex items-center justify-between text-sm">
                 <span className="text-text-secondary">
-                  Monnaie ({primaryCurrencyCode})
+                  Monnaie ({normalizedPaymentCurrencyCode})
                 </span>
                 <div className="flex flex-col items-end">
                   <span className="font-semibold text-text-primary">
-                    {formatPrimaryAmount(change, currencySettings)}
+                    {formatCurrencyAmount(changeInPaymentCurrency, normalizedPaymentCurrencyCode)}
                   </span>
-                  {secondaryEnabled ? (
+                  {amountEquivalentCurrencyCode ? (
                     <span className="text-[10px] text-text-secondary">
-                      Equivalent en {secondaryCurrencyCode}:{" "}
-                      {formatSecondaryAmount(change, currencySettings)}
+                      Equivalent en {amountEquivalentCurrencyCode}: {" "}
+                      {formatAmountEquivalent(changeInPaymentCurrency, normalizedPaymentCurrencyCode)}
                     </span>
                   ) : null}
                 </div>
@@ -427,12 +606,37 @@ const PaymentModal = ({
 
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-xs font-semibold uppercase text-text-secondary">
+                Devise remise
+              </p>
+              <select
+                value={normalizedPaymentCurrencyCode}
+                onChange={(event) => handlePaymentCurrencyChange(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+              >
+                {paymentCurrencyOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <p className="text-xs font-semibold uppercase text-text-secondary">
                 Montant recu
               </p>
               <input
                 type="text"
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onFocus={(event) => {
+                  if (!amountDirty) {
+                    event.target.select();
+                  }
+                }}
+                onChange={(event) => {
+                  setAmount(event.target.value);
+                  setAmountDirty(true);
+                }}
                 className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2 text-lg font-semibold text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 placeholder="0.00"
               />
@@ -442,10 +646,13 @@ const PaymentModal = ({
                   <button
                     key={value}
                     type="button"
-                    onClick={() => setAmount(value.toString())}
-                    className="rounded-lg bg-neutral-200 px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-neutral-300 dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70"
+                    onClick={() => {
+                      setAmount(value.toString());
+                      setAmountDirty(true);
+                    }}
+                    className="rounded-lg bg-background px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70"
                   >
-                    {formatPrimaryAmount(value, currencySettings)}
+                    {formatCurrencyAmount(value, normalizedPaymentCurrencyCode)}
                   </button>
                 ))}
               </div>
@@ -467,15 +674,19 @@ const PaymentModal = ({
             <button
               type="button"
               onClick={handleSubmitPayment}
-              disabled={totalAmount <= 0 || submitting}
+              disabled={!canSubmitPayment}
               className={[
                 "w-full rounded-lg px-4 py-3 text-sm font-semibold text-white",
-                totalAmount <= 0 || submitting
-                  ? "cursor-not-allowed bg-neutral-300 text-text-secondary"
+                !canSubmitPayment
+                  ? "cursor-not-allowed bg-background text-text-secondary"
                   : "bg-secondary hover:bg-secondary/90",
               ].join(" ")}
             >
-              {submitting ? "Enregistrement..." : "Payer maintenant"}
+              {submitting
+                ? "Enregistrement..."
+                : !cashSession
+                  ? "Ouvrir une caisse d'abord"
+                  : "Payer maintenant"}
             </button>
           </div>
         </div>

@@ -101,10 +101,15 @@ export const buildEscPosReceipt = ({
   businessName,
 }) => {
   const bytes = [];
-  const currencyCode =
-    order?.currencyCode || order?.payments?.[0]?.currencyCode || "USD";
+  const payment = order?.payments?.[0] || null;
+  const currencyCode = order?.currencyCode || payment?.currencyCode || "USD";
   const total = Number(order?.total || 0);
-  const paid = Number(amountReceived ?? order?.payments?.[0]?.amount ?? total);
+  const paid = Number(amountReceived ?? payment?.amount ?? total);
+  const originalPaid = Number(payment?.originalAmount ?? paid);
+  const originalCurrencyCode = payment?.originalCurrencyCode || currencyCode;
+  const showOriginalPayment =
+    originalCurrencyCode !== currencyCode ||
+    Math.abs(originalPaid - paid) > 0.005;
   const change = Math.max(0, paid - total);
   const width = 42;
 
@@ -157,9 +162,12 @@ export const buildEscPosReceipt = ({
     ["Total", formatAmount(total, currencyCode)],
     [
       "Paiement",
-      methodLabels[order?.payments?.[0]?.method] || order?.payments?.[0]?.method || "--",
+      methodLabels[payment?.method] || payment?.method || "--",
     ],
     ["Montant recu", formatAmount(paid, currencyCode)],
+    ...(showOriginalPayment
+      ? [["Remis client", formatAmount(originalPaid, originalCurrencyCode)]]
+      : []),
     ["Monnaie", formatAmount(change, currencyCode)],
   ];
 

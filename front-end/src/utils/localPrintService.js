@@ -9,6 +9,8 @@ export const printReceiptViaLocalService = async ({
   cashierName,
   storeName,
   businessName,
+  printerServiceUrl,
+  printerName,
 }) => {
   const payload = buildEscPosReceipt({
     order,
@@ -18,11 +20,14 @@ export const printReceiptViaLocalService = async ({
     businessName,
   });
 
-  const response = await fetch(`${LOCAL_PRINTER_URL}/print`, {
+  const targetUrl = printerServiceUrl || LOCAL_PRINTER_URL;
+
+  const response = await fetch(`${targetUrl}/print`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contentBase64: btoa(String.fromCharCode(...payload)),
+      printerName: printerName || undefined,
     }),
   });
 

@@ -32,5 +32,17 @@ router.post(
   requirePermission("transfers.update"),
   transferController.completeTransfer
 );
+router.post(
+  "/:id/approve",
+  auth,
+  requirePermission("transfers.update"),
+  transferController.approveTransfer
+);
+router.post(
+  "/:id/reject",
+  auth,
+  requirePermission("transfers.update"),
+  transferController.rejectTransfer
+);
 
 module.exports = router;

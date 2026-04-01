@@ -3,8 +3,8 @@ const jwt = require("jsonwebtoken");
 
 const accessExpires = process.env.JWT_ACCESS_EXPIRES || "15m";
 
-const signAccessToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: accessExpires });
+const signAccessToken = (payload, expiresIn = accessExpires) => {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
 const signRefreshToken = (payload, days) => {

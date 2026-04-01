@@ -43,10 +43,15 @@ const buildReceiptHtml = ({
   storeName,
   businessName,
 }) => {
-  const currencyCode =
-    order?.currencyCode || order?.payments?.[0]?.currencyCode || "USD";
+  const payment = order?.payments?.[0] || null;
+  const currencyCode = order?.currencyCode || payment?.currencyCode || "USD";
   const total = Number(order?.total || 0);
-  const paid = Number(amountReceived ?? order?.payments?.[0]?.amount ?? total);
+  const paid = Number(amountReceived ?? payment?.amount ?? total);
+  const originalPaid = Number(payment?.originalAmount ?? paid);
+  const originalCurrencyCode = payment?.originalCurrencyCode || currencyCode;
+  const showOriginalPayment =
+    originalCurrencyCode !== currencyCode ||
+    Math.abs(originalPaid - paid) > 0.005;
   const change = Math.max(0, paid - total);
   const itemsHtml = (order?.items || [])
     .map((item) => {
@@ -165,6 +170,18 @@ const buildReceiptHtml = ({
                 <td>Montant recu</td>
                 <td class="value">${escapeHtml(formatAmount(paid, currencyCode))}</td>
               </tr>
+              ${
+                showOriginalPayment
+                  ? `
+                    <tr>
+                      <td>Remis client</td>
+                      <td class="value">${escapeHtml(
+                        formatAmount(originalPaid, originalCurrencyCode),
+                      )}</td>
+                    </tr>
+                  `
+                  : ""
+              }
               <tr class="grand-total">
                 <td>Monnaie</td>
                 <td class="value">${escapeHtml(formatAmount(change, currencyCode))}</td>

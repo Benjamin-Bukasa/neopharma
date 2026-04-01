@@ -32,5 +32,17 @@ router.post(
   requirePermission("purchase_orders.update"),
   purchaseOrderController.sendPurchaseOrder
 );
+router.post(
+  "/:id/approve",
+  auth,
+  requirePermission("purchase_orders.update"),
+  purchaseOrderController.approvePurchaseOrder
+);
+router.post(
+  "/:id/reject",
+  auth,
+  requirePermission("purchase_orders.update"),
+  purchaseOrderController.rejectPurchaseOrder
+);
 
 module.exports = router;

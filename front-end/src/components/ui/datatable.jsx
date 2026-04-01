@@ -172,8 +172,8 @@ const DataTable = ({
               onSelect={(item) => onExportSelect?.(item)}
               buttonClassName={[
                 "px-4 py-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
-                "bg-neutral-300 text-text-primary focus:ring-neutral-400",
-                "dark:bg-surface dark:text-text-primary dark:border dark:border-border dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50 dark:focus:border-neutral-600/60",
+                "bg-transparent text-text-primary hover:bg-surface/70 focus:ring-secondary/40",
+                "dark:bg-transparent dark:text-text-primary dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50",
                 exportButtonClassName,
               ].join(" ")}
             />
@@ -206,7 +206,7 @@ const DataTable = ({
                 variant={selectedCount === 0 ? "default" : "destructive"}
                 className={
                   selectedCount === 0
-                    ? "bg-[#b0bbb7] text-text-primary hover:bg-[#a6b1ad] disabled:bg-[#b0bbb7] disabled:text-text-primary disabled:opacity-100 disabled:cursor-not-allowed"
+                    ? "bg-header text-text-primary hover:bg-header/80 disabled:bg-header disabled:text-text-primary disabled:opacity-100 disabled:cursor-not-allowed"
                     : ""
                 }
                 size="default"
@@ -238,7 +238,7 @@ const DataTable = ({
             tableClassName,
         ].join(" ")}
         >
-        <thead className="sticky top-0 z-10 bg-[#b0bbb7] dark:bg-[#1D473F]">
+        <thead className="sticky top-0 z-10 bg-header dark:bg-secondary">
           <tr>
             {showSelection ? (
               <th className="border-0 border-b border-border px-4 py-4 text-left w-10">
@@ -389,7 +389,7 @@ const DataTable = ({
                   className={[
                     "px-3 py-1.5 rounded-lg text-sm font-medium border",
                     isActive
-                      ? "bg-[#b0bbb7] text-text-primary border-[#b0bbb7] dark:bg-[#1D473F] dark:text-white dark:border-[#1D473F]"
+                      ? "bg-header text-text-primary border-header dark:bg-secondary dark:text-white dark:border-secondary"
                       : "bg-surface text-text-primary border-border hover:bg-surface/70 dark:bg-surface/70 dark:text-text-primary",
                   ].join(" ")}
                 >

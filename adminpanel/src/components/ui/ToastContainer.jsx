@@ -55,7 +55,7 @@ const ToastItem = ({ toast, onClose }) => {
                   "rounded-lg px-3 py-1.5 text-xs font-medium",
                   action.variant === "outline"
                     ? "border border-border text-text-primary hover:bg-surface/70"
-                    : "bg-neutral-200 text-text-primary hover:bg-neutral-300 dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70",
+                    : "bg-background text-text-primary hover:bg-surface dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70",
                 ].join(" ")}
               >
                 {action.label}

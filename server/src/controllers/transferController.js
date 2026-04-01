@@ -13,6 +13,56 @@ const {
   attachDocumentCodes,
   assignGeneratedDocumentCode,
 } = require("../utils/documentCodeStore");
+const {
+  transferInventoryLotsFefo,
+  emitLotExpiryNotifications,
+  ensureInventoryLotTables,
+} = require("../utils/inventoryLotStore");
+const {
+  getDocumentApprovalMap,
+  getDocumentApprovals,
+  prepareDocumentApprovals,
+  decideDocumentApproval,
+} = require("../utils/documentApprovalStore");
+
+const TRANSFER_DOCUMENT_TYPE = "TRANSFER";
+const TRANSFER_FLOW_CODE = "TRANSFER";
+
+const mapTransferStatus = (rawStatus, approvals = []) => {
+  if (!approvals.length) return rawStatus;
+  if (approvals.some((item) => item.status === "REJECTED")) return "REJECTED";
+  if (rawStatus === "COMPLETED" || rawStatus === "CANCELED") return rawStatus;
+  return "SUBMITTED";
+};
+
+const decorateTransfersWithApprovals = async (records, { includeApprovals = true } = {}) => {
+  const list = Array.isArray(records) ? records.filter(Boolean) : records ? [records] : [];
+  if (!list.length) return Array.isArray(records) ? [] : records;
+
+  const approvalMap = await getDocumentApprovalMap(
+    list[0].tenantId,
+    TRANSFER_DOCUMENT_TYPE,
+    list.map((item) => item.id),
+  );
+
+  const mapped = list.map((item) => {
+    const approvals = approvalMap.get(item.id) || [];
+    return {
+      ...item,
+      rawStatus: item.status,
+      status: mapTransferStatus(item.status, approvals),
+      ...(includeApprovals ? { approvals } : {}),
+    };
+  });
+
+  return Array.isArray(records) ? mapped : mapped[0];
+};
+
+const canModifyTransfer = async (tenantId, transfer) => {
+  if (transfer.status !== "DRAFT") return false;
+  const approvals = await getDocumentApprovals(tenantId, TRANSFER_DOCUMENT_TYPE, transfer.id);
+  return !approvals.length || approvals.some((item) => item.status === "REJECTED");
+};
 
 const includesSearch = (value, search) =>
   String(value || "")
@@ -231,7 +281,7 @@ const createTransfer = async (req, res) => {
     });
   }
 
-  return res.status(201).json(transferWithCode);
+  return res.status(201).json(await decorateTransfersWithApprovals(transferWithCode));
 };
 
 const listTransfers = async (req, res) => {
@@ -299,8 +349,10 @@ const listTransfers = async (req, res) => {
       orderBy,
     });
     return res.json(
-      (await attachDocumentCodes("productTransferts", transfers)).filter((item) =>
-        matchesTransferSearch(item, search),
+      await decorateTransfersWithApprovals(
+        (await attachDocumentCodes("productTransferts", transfers)).filter((item) =>
+          matchesTransferSearch(item, search),
+        ),
       ),
     );
   }
@@ -323,7 +375,9 @@ const listTransfers = async (req, res) => {
   const total = filteredTransfers.length;
 
   return res.json({
-    data: filteredTransfers.slice((page - 1) * pageSize, page * pageSize),
+    data: await decorateTransfersWithApprovals(
+      filteredTransfers.slice((page - 1) * pageSize, page * pageSize),
+    ),
     meta: buildMeta({ page, pageSize, total, sortBy, sortDir }),
   });
 };
@@ -347,7 +401,11 @@ const getTransfer = async (req, res) => {
     return res.status(404).json({ message: "Transfer not found." });
   }
 
-  return res.json(await attachDocumentCodes("productTransferts", transfer));
+  return res.json(
+    await decorateTransfersWithApprovals(
+      await attachDocumentCodes("productTransferts", transfer),
+    ),
+  );
 };
 
 const updateTransfer = async (req, res) => {
@@ -369,7 +427,7 @@ const updateTransfer = async (req, res) => {
     return res.status(404).json({ message: "Transfer not found." });
   }
 
-  if (transfer.status !== "DRAFT") {
+  if (!(await canModifyTransfer(req.user.tenantId, transfer))) {
     return res.status(400).json({ message: "Only draft transfers can be edited." });
   }
 
@@ -422,7 +480,11 @@ const updateTransfer = async (req, res) => {
     },
   });
 
-  return res.json(await attachDocumentCodes("productTransferts", updated));
+  return res.json(
+    await decorateTransfersWithApprovals(
+      await attachDocumentCodes("productTransferts", updated),
+    ),
+  );
 };
 
 const deleteTransfer = async (req, res) => {
@@ -436,7 +498,7 @@ const deleteTransfer = async (req, res) => {
     return res.status(404).json({ message: "Transfer not found." });
   }
 
-  if (transfer.status !== "DRAFT") {
+  if (!(await canModifyTransfer(req.user.tenantId, transfer))) {
     return res.status(400).json({ message: "Only draft transfers can be deleted." });
   }
 
@@ -444,38 +506,19 @@ const deleteTransfer = async (req, res) => {
   return res.json({ message: "Transfer deleted." });
 };
 
-const completeTransfer = async (req, res) => {
-  const { id } = req.params;
-
-  const transfer = await prisma.productTransfer.findUnique({
-    where: { id },
-    include: { items: true },
-  });
-  if (!transfer || transfer.tenantId !== req.user.tenantId) {
-    return res.status(404).json({ message: "Transfer not found." });
-  }
-
-  if (transfer.status === "COMPLETED") {
-    return res.status(400).json({ message: "Transfer already completed." });
-  }
+const executeTransferCompletion = async (transfer, userId) => {
+  await ensureInventoryLotTables();
 
   if (!transfer.fromZoneId || !transfer.toZoneId) {
-    return res.status(400).json({
-      message: "Transfer must define both source and target zones.",
+    throw Object.assign(new Error("Transfer must define both source and target zones."), {
+      status: 400,
     });
   }
 
-  let executionPlan;
-  try {
-    executionPlan = await buildTransferExecutionPlan({
-      tenantId: transfer.tenantId,
-      items: transfer.items,
-    });
-  } catch (error) {
-    return res.status(error.status || 500).json({
-      message: error.message || "Impossible de finaliser ce transfert.",
-    });
-  }
+  const executionPlan = await buildTransferExecutionPlan({
+    tenantId: transfer.tenantId,
+    items: transfer.items,
+  });
 
   for (const item of executionPlan.executionItems) {
     const quantity = Number(item.quantity || 0);
@@ -489,77 +532,65 @@ const completeTransfer = async (req, res) => {
     });
 
     if (!sourceInventory || Number(sourceInventory.quantity || 0) < quantity) {
-      return res.status(400).json({
-        message: `Stock insuffisant pour ${item.label}.`,
+      throw Object.assign(new Error(`Stock insuffisant pour ${item.label}.`), {
+        status: 400,
       });
     }
   }
 
-  await prisma.$transaction(
-    executionPlan.executionItems.flatMap((item) => {
+  await prisma.$transaction(async (tx) => {
+    for (const item of executionPlan.executionItems) {
       const quantity = Number(item.quantity || 0);
 
-      return [
-        prisma.inventory.update({
-          where: {
-            storageZoneId_productId: {
-              storageZoneId: transfer.fromZoneId,
-              productId: item.productId,
-            },
-          },
-          data: {
-            quantity: { decrement: quantity },
-          },
-        }),
-        prisma.inventory.upsert({
-          where: {
-            storageZoneId_productId: {
-              storageZoneId: transfer.toZoneId,
-              productId: item.productId,
-            },
-          },
-          create: {
-            tenantId: transfer.tenantId,
-            storeId: transfer.toStoreId,
-            storageZoneId: transfer.toZoneId,
-            productId: item.productId,
-            quantity,
-          },
-          update: {
-            quantity: { increment: quantity },
-          },
-        }),
-        prisma.inventoryMovement.create({
-          data: {
-            tenantId: transfer.tenantId,
-            productId: item.productId,
-            storageZoneId: transfer.fromZoneId,
-            quantity,
-            movementType: "TRANSFER_OUT",
-            sourceType: "TRANSFER",
-            sourceId: transfer.id,
-            createdById: req.user.id,
-          },
-        }),
-        prisma.inventoryMovement.create({
-          data: {
-            tenantId: transfer.tenantId,
-            productId: item.productId,
-            storageZoneId: transfer.toZoneId,
-            quantity,
-            movementType: "TRANSFER_IN",
-            sourceType: "TRANSFER",
-            sourceId: transfer.id,
-            createdById: req.user.id,
-          },
-        }),
-      ];
-    })
-  );
+      await transferInventoryLotsFefo(tx, {
+        tenantId: transfer.tenantId,
+        fromStoreId: transfer.fromStoreId,
+        fromZoneId: transfer.fromZoneId,
+        toStoreId: transfer.toStoreId,
+        toZoneId: transfer.toZoneId,
+        productId: item.productId,
+        quantity,
+      });
+
+      await tx.inventoryMovement.create({
+        data: {
+          tenantId: transfer.tenantId,
+          productId: item.productId,
+          storageZoneId: transfer.fromZoneId,
+          quantity,
+          movementType: "TRANSFER_OUT",
+          sourceType: "TRANSFER",
+          sourceId: transfer.id,
+          createdById: userId,
+        },
+      });
+
+      await tx.inventoryMovement.create({
+        data: {
+          tenantId: transfer.tenantId,
+          productId: item.productId,
+          storageZoneId: transfer.toZoneId,
+          quantity,
+          movementType: "TRANSFER_IN",
+          sourceType: "TRANSFER",
+          sourceId: transfer.id,
+          createdById: userId,
+        },
+      });
+    }
+  });
 
   const updated = await prisma.productTransfer.update({
-    where: { id },
+    where: { id: transfer.id },
     data: { status: "COMPLETED" },
+    include: {
+      items: { include: { product: true, unit: true } },
+      fromStore: true,
+      toStore: true,
+      fromZone: true,
+      toZone: true,
+      requestedBy: true,
+    },
   });
 
   emitToStore(transfer.fromStoreId, "transfer:completed", {
@@ -577,7 +608,168 @@ const completeTransfer = async (req, res) => {
     });
   }
 
-  return res.json(updated);
+  await emitLotExpiryNotifications(transfer.tenantId);
+  return updated;
+};
+
+const completeTransfer = async (req, res) => {
+  const { id } = req.params;
+
+  const transfer = await prisma.productTransfer.findUnique({
+    where: { id },
+    include: {
+      items: { include: { product: true, unit: true } },
+      fromStore: true,
+      toStore: true,
+      fromZone: true,
+      toZone: true,
+      requestedBy: true,
+    },
+  });
+  if (!transfer || transfer.tenantId !== req.user.tenantId) {
+    return res.status(404).json({ message: "Transfer not found." });
+  }
+
+  if (transfer.status === "COMPLETED") {
+    return res.status(400).json({ message: "Transfer already completed." });
+  }
+
+  const approvalSession = await prepareDocumentApprovals({
+    tenantId: req.user.tenantId,
+    documentType: TRANSFER_DOCUMENT_TYPE,
+    documentId: id,
+    flowCodes: [TRANSFER_FLOW_CODE, "STOCK_EXIT"],
+  });
+
+  let updated;
+  try {
+    if (!approvalSession.approvals.length) {
+      updated = await executeTransferCompletion(transfer, req.user.id);
+    } else {
+      updated = await prisma.productTransfer.update({
+        where: { id },
+        data: { status: "IN_TRANSIT" },
+        include: {
+          items: { include: { product: true, unit: true } },
+          fromStore: true,
+          toStore: true,
+          fromZone: true,
+          toZone: true,
+          requestedBy: true,
+        },
+      });
+    }
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de finaliser ce transfert.",
+    });
+  }
+
+  return res.json(
+    await decorateTransfersWithApprovals(
+      await attachDocumentCodes("productTransferts", updated),
+    ),
+  );
+};
+
+const approveTransfer = async (req, res) => {
+  const { id } = req.params;
+  const note = req.body?.note || null;
+
+  const transfer = await prisma.productTransfer.findFirst({
+    where: { id, tenantId: req.user.tenantId },
+    include: {
+      items: { include: { product: true, unit: true } },
+      fromStore: true,
+      toStore: true,
+      fromZone: true,
+      toZone: true,
+      requestedBy: true,
+    },
+  });
+  if (!transfer) {
+    return res.status(404).json({ message: "Transfer not found." });
+  }
+
+  try {
+    const decision = await decideDocumentApproval({
+      tenantId: req.user.tenantId,
+      documentType: TRANSFER_DOCUMENT_TYPE,
+      documentId: id,
+      user: req.user,
+      decision: "APPROVED",
+      note,
+    });
+
+    let updated = transfer;
+    if (decision.lifecycleStatus === "APPROVED") {
+      updated = await executeTransferCompletion(transfer, req.user.id);
+    }
+
+    return res.json(
+      await decorateTransfersWithApprovals(
+        await attachDocumentCodes("productTransferts", updated),
+      ),
+    );
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de valider ce transfert.",
+    });
+  }
+};
+
+const rejectTransfer = async (req, res) => {
+  const { id } = req.params;
+  const note = req.body?.note || null;
+
+  const transfer = await prisma.productTransfer.findFirst({
+    where: { id, tenantId: req.user.tenantId },
+    include: {
+      items: { include: { product: true, unit: true } },
+      fromStore: true,
+      toStore: true,
+      fromZone: true,
+      toZone: true,
+      requestedBy: true,
+    },
+  });
+  if (!transfer) {
+    return res.status(404).json({ message: "Transfer not found." });
+  }
+
+  try {
+    await decideDocumentApproval({
+      tenantId: req.user.tenantId,
+      documentType: TRANSFER_DOCUMENT_TYPE,
+      documentId: id,
+      user: req.user,
+      decision: "REJECTED",
+      note,
+    });
+
+    const updated = await prisma.productTransfer.update({
+      where: { id },
+      data: { status: "DRAFT" },
+      include: {
+        items: { include: { product: true, unit: true } },
+        fromStore: true,
+        toStore: true,
+        fromZone: true,
+        toZone: true,
+        requestedBy: true,
+      },
+    });
+
+    return res.json(
+      await decorateTransfersWithApprovals(
+        await attachDocumentCodes("productTransferts", updated),
+      ),
+    );
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de rejeter ce transfert.",
+    });
+  }
 };
 
 const getTransferPdf = async (req, res) => {
@@ -617,4 +809,6 @@ module.exports = {
   updateTransfer,
   deleteTransfer,
   completeTransfer,
+  approveTransfer,
+  rejectTransfer,
 };

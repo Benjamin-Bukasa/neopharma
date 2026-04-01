@@ -19,6 +19,10 @@ const {
   buildDateRangeFilter,
 } = require("../utils/listing");
 const { sendExport } = require("../utils/exporter");
+const {
+  getUserPreferences,
+  upsertUserPreferences,
+} = require("../utils/userPreferenceStore");
 
 const createUserRecord = async ({
   tenantId,
@@ -445,6 +449,7 @@ const getUser = async (req, res) => {
 
   return res.json({
     ...user,
+    tenantName: req.user.tenantName || null,
     permissions: (user.permissions || []).map((item) => item.permission.code),
     permissionProfile,
     permissionProfileId: permissionProfile?.id || null,
@@ -580,6 +585,58 @@ const updateUserPermissions = async (req, res) => {
   return res.json({ message: "Permissions updated." });
 };
 
+const getMyPreferences = async (req, res) => {
+  const preferences = await getUserPreferences({
+    tenantId: req.user.tenantId,
+    userId: req.user.id,
+  });
+
+  return res.json(preferences);
+};
+
+const updateMyPreferences = async (req, res) => {
+  const body = req.body || {};
+  const allowedThemes = new Set(["light", "dark"]);
+  const allowedPrinterModes = new Set(["browser", "local_service"]);
+  const allowedColors = new Set(["blue", "red", "orange", "green", "purple"]);
+
+  const preferences = {
+    theme: allowedThemes.has(String(body.theme || "").trim())
+      ? String(body.theme).trim()
+      : null,
+    primaryColor: allowedColors.has(String(body.primaryColor || "").trim())
+      ? String(body.primaryColor).trim()
+      : "green",
+    secondaryColor: allowedColors.has(String(body.secondaryColor || "").trim())
+      ? String(body.secondaryColor).trim()
+      : "green",
+    accentColor: allowedColors.has(String(body.accentColor || "").trim())
+      ? String(body.accentColor).trim()
+      : "green",
+    printerMode: allowedPrinterModes.has(String(body.printerMode || "").trim())
+      ? String(body.printerMode).trim()
+      : "browser",
+    printerServiceUrl: body.printerServiceUrl
+      ? String(body.printerServiceUrl).trim()
+      : "",
+    printerName: body.printerName ? String(body.printerName).trim() : "",
+    autoPrintReceipt:
+      body.autoPrintReceipt === undefined ? true : Boolean(body.autoPrintReceipt),
+    showSecondaryAmounts:
+      body.showSecondaryAmounts === undefined
+        ? true
+        : Boolean(body.showSecondaryAmounts),
+  };
+
+  const updated = await upsertUserPreferences({
+    tenantId: req.user.tenantId,
+    userId: req.user.id,
+    preferences,
+  });
+
+  return res.json(updated);
+};
+
 module.exports = {
   createUser,
   downloadUsersTemplate,
@@ -589,4 +646,6 @@ module.exports = {
   updateUser,
   deactivateUser,
   updateUserPermissions,
+  getMyPreferences,
+  updateMyPreferences,
 };

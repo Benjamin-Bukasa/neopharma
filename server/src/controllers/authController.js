@@ -14,6 +14,17 @@ const { sendEmail, sendSms } = require("../services/notificationService");
 const { verifyGoogleIdToken } = require("../services/googleService");
 const { getPlanConfig } = require("../services/subscriptionService");
 
+const getClientType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "adminpanel") return "adminpanel";
+  if (normalized === "frontend") return "frontend";
+  return "frontend";
+};
+
+const getAccessTokenTtlByClient = (clientType) => {
+  return getClientType(clientType) === "adminpanel" ? "60m" : "480m";
+};
+
 const register = async (req, res) => {
   const { tenantName, email, phone, plan, sendVia, firstName, lastName } =
     req.body || {};
@@ -95,7 +106,8 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  const { identifier, password, rememberMe, twoFactorCode } = req.body || {};
+  const { identifier, password, rememberMe, twoFactorCode, clientType } =
+    req.body || {};
 
   if (!identifier || !password) {
     return res.status(400).json({ message: "Identifier and password required." });
@@ -105,7 +117,7 @@ const login = async (req, res) => {
     where: {
       OR: [{ email: identifier }, { phone: identifier }],
     },
-    include: { store: true },
+    include: { store: true, tenant: true },
   });
 
   if (!user || !user.passwordHash) {
@@ -143,14 +155,21 @@ const login = async (req, res) => {
     });
   }
 
-  const accessToken = signAccessToken({
-    sub: user.id,
-    tenantId: user.tenantId,
-    role: user.role,
-  });
+  const normalizedClientType = getClientType(clientType);
+  const accessToken = signAccessToken(
+    {
+      sub: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+    },
+    getAccessTokenTtlByClient(normalizedClientType),
+  );
 
   const refreshDays = rememberMe ? 30 : Number(process.env.JWT_REFRESH_DAYS || 7);
-  const refreshToken = signRefreshToken({ sub: user.id }, refreshDays);
+  const refreshToken = signRefreshToken(
+    { sub: user.id, clientType: normalizedClientType },
+    refreshDays,
+  );
 
   await prisma.authSession.create({
     data: {
@@ -171,6 +190,7 @@ const login = async (req, res) => {
     user: {
       id: user.id,
       tenantId: user.tenantId,
+      tenantName: user.tenant?.name || null,
       role: user.role,
       email: user.email,
       phone: user.phone,
@@ -198,23 +218,37 @@ const refresh = async (req, res) => {
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
-      include: { user: true },
+      include: {
+        user: {
+          include: {
+            tenant: true,
+            store: true,
+          },
+        },
+      },
     });
 
     if (!session) {
       return res.status(401).json({ message: "Invalid refresh token." });
     }
 
-    const accessToken = signAccessToken({
-      sub: session.user.id,
-      tenantId: session.user.tenantId,
-      role: session.user.role,
-    });
+    const normalizedClientType = getClientType(payload.clientType);
+    const accessToken = signAccessToken(
+      {
+        sub: session.user.id,
+        tenantId: session.user.tenantId,
+        role: session.user.role,
+      },
+      getAccessTokenTtlByClient(normalizedClientType),
+    );
 
     const now = new Date();
     const remainingMs = session.expiresAt.getTime() - now.getTime();
     const refreshDays = Math.max(1, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
-    const newRefreshToken = signRefreshToken({ sub: session.user.id }, refreshDays);
+    const newRefreshToken = signRefreshToken(
+      { sub: session.user.id, clientType: normalizedClientType },
+      refreshDays,
+    );
 
     await prisma.authSession.update({
       where: { id: session.id },
@@ -228,6 +262,19 @@ const refresh = async (req, res) => {
     return res.json({
       accessToken,
       refreshToken: newRefreshToken,
+      user: {
+        id: session.user.id,
+        tenantId: session.user.tenantId,
+        tenantName: session.user.tenant?.name || null,
+        role: session.user.role,
+        email: session.user.email,
+        phone: session.user.phone,
+        firstName: session.user.firstName,
+        lastName: session.user.lastName,
+        storeId: session.user.storeId,
+        storeName: session.user.store?.name || null,
+        defaultStorageZoneId: session.user.defaultStorageZoneId || null,
+      },
     });
   } catch (error) {
     return res.status(401).json({ message: "Invalid refresh token." });
@@ -442,7 +489,7 @@ const disable2fa = async (req, res) => {
 };
 
 const googleLogin = async (req, res) => {
-  const { idToken, tenantName, plan } = req.body || {};
+  const { idToken, tenantName, plan, clientType } = req.body || {};
   if (!idToken) {
     return res.status(400).json({ message: "idToken required." });
   }
@@ -452,7 +499,7 @@ const googleLogin = async (req, res) => {
     where: {
       OR: [{ googleId: profile.sub }, { email: profile.email }],
     },
-    include: { store: true },
+    include: { store: true, tenant: true },
   });
 
   if (!user) {
@@ -491,6 +538,9 @@ const googleLogin = async (req, res) => {
         googleId: profile.sub,
         mustChangePassword: false,
       },
+      include: {
+        tenant: true,
+      },
     });
 
     await prisma.tenant.update({
@@ -501,7 +551,7 @@ const googleLogin = async (req, res) => {
     user = await prisma.user.update({
       where: { id: user.id },
       data: { googleId: profile.sub },
-      include: { store: true },
+      include: { store: true, tenant: true },
     });
   }
 
@@ -512,14 +562,21 @@ const googleLogin = async (req, res) => {
     });
   }
 
-  const accessToken = signAccessToken({
-    sub: user.id,
-    tenantId: user.tenantId,
-    role: user.role,
-  });
+  const normalizedClientType = getClientType(clientType);
+  const accessToken = signAccessToken(
+    {
+      sub: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+    },
+    getAccessTokenTtlByClient(normalizedClientType),
+  );
 
   const refreshDays = Number(process.env.JWT_REFRESH_DAYS || 7);
-  const refreshToken = signRefreshToken({ sub: user.id }, refreshDays);
+  const refreshToken = signRefreshToken(
+    { sub: user.id, clientType: normalizedClientType },
+    refreshDays,
+  );
 
   await prisma.authSession.create({
     data: {
@@ -535,6 +592,7 @@ const googleLogin = async (req, res) => {
     user: {
       id: user.id,
       tenantId: user.tenantId,
+      tenantName: user.tenant?.name || null,
       role: user.role,
       email: user.email,
       phone: user.phone,

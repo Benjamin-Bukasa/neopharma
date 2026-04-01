@@ -19,9 +19,9 @@ const VARIANT_CLASSES = {
   warning: "bg-warning/15 text-warning border-warning/30",
   danger: "bg-danger/15 text-danger border-danger/30",
   active:
-    "bg-[#b0bbb7] text-text-primary border-[#b0bbb7] dark:bg-success/15 dark:text-success dark:border-success/30",
+    "bg-header text-text-primary border-header dark:bg-success/15 dark:text-success dark:border-success/30",
   inactive:
-    "bg-neutral-300 text-text-primary border-neutral-300 dark:bg-danger/15 dark:text-danger dark:border-danger/30",
+    "bg-background text-text-primary border-border dark:bg-danger/15 dark:text-danger dark:border-danger/30",
   neutral: "bg-surface/80 text-text-secondary border-border",
 };
 

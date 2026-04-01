@@ -6,6 +6,7 @@ import routes from "./routes/router";
 import useThemeStore from "./stores/themeStore";
 import useAuthStore from "./stores/authStore";
 import useCurrencyStore from "./stores/currencyStore";
+import useUserPreferenceStore from "./stores/userPreferenceStore";
 import ToastContainer from "./components/ui/toast";
 import { initRealtimeListeners } from "./services/realtimeListeners";
 
@@ -13,6 +14,7 @@ useThemeStore.getState().initTheme();
 useAuthStore.getState().init();
 if (useAuthStore.getState().isAuthenticated) {
   useCurrencyStore.getState().loadSettings();
+  useUserPreferenceStore.getState().loadPreferences();
 }
 
 const syncCurrencySettings = () => {
@@ -33,10 +35,12 @@ if (typeof window !== "undefined") {
 useAuthStore.subscribe((state, previousState) => {
   if (state.isAuthenticated && state.accessToken !== previousState.accessToken) {
     useCurrencyStore.getState().loadSettings({ force: true });
+    useUserPreferenceStore.getState().loadPreferences({ force: true });
   }
 
   if (!state.isAuthenticated && previousState.isAuthenticated) {
     useCurrencyStore.getState().reset();
+    useUserPreferenceStore.getState().reset();
   }
 });
 initRealtimeListeners();

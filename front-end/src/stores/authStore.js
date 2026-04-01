@@ -63,6 +63,12 @@ const useAuthStore = create((set, get) => ({
       user: user || null,
       isAuthenticated: Boolean(accessToken),
     });
+
+    if (refreshToken && (!user || !user.tenantName)) {
+      get()
+        .refreshSession()
+        .catch(() => {});
+    }
   },
 
   login: async ({ identifier, password, rememberMe, twoFactorCode }) => {
@@ -76,6 +82,7 @@ const useAuthStore = create((set, get) => ({
           password,
           rememberMe: Boolean(rememberMe),
           twoFactorCode,
+          clientType: "frontend",
         }),
       });
       const data = await parseJson(response);
@@ -120,6 +127,41 @@ const useAuthStore = create((set, get) => ({
       set({ loading: false, error: message });
       return { success: false, message };
     }
+  },
+
+  refreshSession: async () => {
+    const refreshToken = get().refreshToken;
+    if (!refreshToken) {
+      throw new Error("Jeton de rafraichissement manquant.");
+    }
+
+    const response = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const data = await parseJson(response);
+
+    if (!response.ok) {
+      throw new Error(translateMessage(data.message, "Session expiree."));
+    }
+
+    const nextUser = data.user ? { ...(get().user || {}), ...data.user } : get().user;
+
+    persistAuth({
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      user: nextUser,
+    });
+
+    set({
+      user: nextUser,
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      isAuthenticated: true,
+    });
+
+    return data;
   },
 
   logout: async () => {

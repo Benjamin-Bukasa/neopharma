@@ -130,7 +130,7 @@ const DropdownAction = ({
         "w-full rounded-lg border px-2 py-1 text-left text-sm transition-colors";
       const variantClasses = isDanger
         ? "border-red-600 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-300"
-        : "border-transparent bg-transparent text-text-primary hover:bg-neutral-200/80 dark:hover:bg-white/10";
+        : "border-transparent bg-transparent text-text-primary hover:bg-background/80 dark:hover:bg-white/10";
       const disabledClasses = isDisabled
         ? "cursor-not-allowed opacity-50 hover:bg-transparent"
         : "";
@@ -179,7 +179,7 @@ const DropdownAction = ({
         disabled={disabled}
         onClick={toggleMenu}
         className={[
-          "rounded-lg bg-[#b0bbb7] px-3 py-2 text-sm font-normal text-text-primary transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#1D473F] dark:text-white",
+          "rounded-lg bg-transparent px-3 py-2 text-sm font-normal text-text-primary transition hover:bg-surface/70 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-transparent dark:text-text-primary dark:hover:bg-surface/70",
           buttonClassName,
         ].join(" ")}
       >

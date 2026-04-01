@@ -246,6 +246,8 @@ const AdminCreatePage = () => {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const showToast = useToastStore((state) => state.showToast);
+  const currencySettings = useCurrencyStore((state) => state.settings);
+  const currencyLoaded = useCurrencyStore((state) => state.loaded);
   const loadCurrencySettings = useCurrencyStore((state) => state.loadSettings);
 
   const [values, setValues] = useState(() => buildInitialValues(formConfig));
@@ -269,6 +271,35 @@ const AdminCreatePage = () => {
     setError("");
     setSuccess("");
   }, [formConfig]);
+
+  useEffect(() => {
+    if (!accessToken || currencyLoaded) return;
+    loadCurrencySettings({ token: accessToken });
+  }, [accessToken, currencyLoaded, loadCurrencySettings]);
+
+  useEffect(() => {
+    if (!formConfig || isEditing) return;
+    if (!currencySettings?.primaryCurrencyCode) return;
+
+    const fieldsWithPrimaryCurrencyDefault = (formConfig.fields || []).filter(
+      (field) => field.usePrimaryCurrencyDefault,
+    );
+    if (!fieldsWithPrimaryCurrencyDefault.length) return;
+
+    setValues((current) => {
+      const nextValues = { ...current };
+      let changed = false;
+
+      fieldsWithPrimaryCurrencyDefault.forEach((field) => {
+        if (!nextValues[field.name]) {
+          nextValues[field.name] = currencySettings.primaryCurrencyCode;
+          changed = true;
+        }
+      });
+
+      return changed ? nextValues : current;
+    });
+  }, [currencySettings?.primaryCurrencyCode, formConfig, isEditing]);
 
   useEffect(() => {
     let ignore = false;

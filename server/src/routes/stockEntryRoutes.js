@@ -33,6 +33,12 @@ router.post(
   stockEntryController.approveStockEntry
 );
 router.post(
+  "/:id/reject",
+  auth,
+  requirePermission("movements.update"),
+  stockEntryController.rejectStockEntry
+);
+router.post(
   "/:id/post",
   auth,
   requirePermission("movements.update"),

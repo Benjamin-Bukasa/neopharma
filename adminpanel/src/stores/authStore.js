@@ -126,6 +126,7 @@ const useAuthStore = create((set, get) => ({
           password,
           rememberMe: Boolean(rememberMe),
           twoFactorCode,
+          clientType: "adminpanel",
         }),
       });
 

@@ -14,6 +14,8 @@ import {
   Gift,
   LayoutDashboard,
   ListChecks,
+  AlertTriangle,
+  Palette,
   Package,
   PackageCheck,
   PackageOpen,
@@ -42,6 +44,8 @@ import Dashboard from "../pages/Dashboard";
 import AdminResourcePage from "../pages/AdminResourcePage";
 import AdminCreatePage from "../pages/AdminCreatePage";
 import AdminDetailPage from "../pages/AdminDetailPage";
+import AdminInventoryCountPage from "../pages/AdminInventoryCountPage";
+import SettingsPage from "../pages/SettingsPage";
 import Login from "../pages/Login";
 import ProtectedRoute from "./ProtectedRoute";
 import { formatMoney } from "../utils/currencyDisplay";
@@ -161,6 +165,7 @@ const createResource = ({
   transformRows,
   rowActions,
   importConfig,
+  exportFileBaseName,
   ...rest
 }) => ({
   endpoint,
@@ -176,6 +181,7 @@ const createResource = ({
   transformRows,
   rowActions,
   importConfig,
+  exportFileBaseName,
   ...rest,
 });
 
@@ -185,6 +191,28 @@ const compactValue = (value) =>
 const upperCodeValue = (value) => {
   const compacted = compactValue(value);
   return typeof compacted === "string" ? compacted.trim().toUpperCase() : compacted;
+};
+
+const formatDateOnly = (value) => {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "medium",
+  }).format(date);
+};
+
+const formatExpiryStatus = (value) => {
+  switch (String(value || "").toUpperCase()) {
+    case "EXPIRE":
+      return <span className="inline-flex rounded-full bg-danger/10 px-3 py-1 text-xs font-medium text-danger">Expire</span>;
+    case "EXPIRE_BIENTOT":
+      return <span className="inline-flex rounded-full bg-warning/10 px-3 py-1 text-xs font-medium text-warning">Expire bientot</span>;
+    case "OK":
+      return <span className="inline-flex rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">Valide</span>;
+    default:
+      return <span className="inline-flex rounded-full bg-header/20 px-3 py-1 text-xs font-medium text-text-secondary">Sans date</span>;
+  }
 };
 
 const resolveAssetUrl = (value) => {
@@ -277,6 +305,16 @@ export const dashboardMeta = leaf({
   icon: LayoutDashboard,
   summary: "Pilotage global de l'administration centrale.",
   sectionLabel: "Exploitation",
+});
+
+export const settingsMeta = leaf({
+  id: "settings",
+  name: "Parametres",
+  path: "/settings",
+  link: "settings",
+  icon: Settings2,
+  summary: "Personnalisation de l'apparence de l'adminpanel.",
+  sectionLabel: "Administration",
 });
 
 export const sidebarSections = [
@@ -411,6 +449,17 @@ export const sidebarSections = [
             parentLabel: "Mouvement",
             parentPath: "/mouvement",
           }),
+          leaf({
+            id: "mouvement-historique-caisse",
+            name: "Historique caisse",
+            path: "/mouvement/historique-caisse",
+            link: "mouvement-historique-caisse",
+            icon: WalletCards,
+            summary: "Ouvertures, clotures et ecarts des sessions de caisse.",
+            sectionLabel: "Mouvement",
+            parentLabel: "Mouvement",
+            parentPath: "/mouvement",
+          }),
         ],
       },
       leaf({
@@ -420,6 +469,15 @@ export const sidebarSections = [
         link: "etat-stock",
         icon: ScanSearch,
         summary: "Niveau, couverture et alertes sur les quantites disponibles.",
+        sectionLabel: "Exploitation",
+      }),
+      leaf({
+        id: "lots-peremptions",
+        name: "Lots / Peremptions",
+        path: "/lots-peremptions",
+        link: "lots-peremptions",
+        icon: AlertTriangle,
+        summary: "Suivi des lots expires ou expirant bientot par boutique et zone.",
         sectionLabel: "Exploitation",
       }),
       leaf({
@@ -562,6 +620,17 @@ export const sidebarSections = [
         icon: Settings2,
         children: [
           leaf({
+            id: "parametres-personnalisation",
+            name: "Personnalisation",
+            path: "/settings",
+            link: "settings",
+            icon: Palette,
+            summary: "Couleurs, theme et personnalisation de l'interface.",
+            sectionLabel: "Configurations",
+            parentLabel: "Parametres",
+            parentPath: "/configurations/parametres",
+          }),
+          leaf({
             id: "parametres-unite",
             name: "Unite",
             path: "/configurations/parametres/unite",
@@ -701,6 +770,7 @@ export const sidebarItems = sidebarSections.flatMap((section) => section.items);
 
 export const allRouteMeta = [
   dashboardMeta,
+  settingsMeta,
   ...sidebarSections.flatMap((section) =>
     section.items.flatMap((item) => (item.children?.length ? item.children : [item])),
   ),
@@ -761,9 +831,14 @@ const routePermissionConfig = {
     create: ["movements.create"],
     edit: ["movements.update"],
     delete: ["movements.delete"],
+    detail: ["movements.read"],
   },
   "/mouvement/historique-mouvements": {
     read: ["movements.read"],
+  },
+  "/mouvement/historique-caisse": {
+    read: ["movements.read"],
+    detail: ["movements.read"],
   },
   "/etat-stock": {
     read: ["stock_state.read"],
@@ -773,12 +848,14 @@ const routePermissionConfig = {
     create: ["inventory.create"],
     edit: ["inventory.update"],
     delete: ["inventory.delete"],
+    detail: ["inventory.read"],
   },
   "/inventaire/etat-inventaire": {
     read: ["inventory.read"],
     create: ["inventory.create"],
     edit: ["inventory.update"],
     delete: ["inventory.delete"],
+    detail: ["inventory.read"],
   },
   "/configurations/articles/produits": {
     read: ["settings.read"],
@@ -890,8 +967,12 @@ const routePermissionConfig = {
   },
 };
 
-const normalizePath = (path = "") =>
-  path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path || "/dashboard";
+const normalizePath = (path = "") => {
+  const normalized = typeof path === "string" ? path : "";
+  return normalized.length > 1 && normalized.endsWith("/")
+    ? normalized.slice(0, -1)
+    : normalized || "/dashboard";
+};
 
 export const getRouteRequiredPermissions = (path = "") =>
   routePermissionConfig[normalizePath(path)]?.read || [];
@@ -987,11 +1068,45 @@ const deliveryNoteColumns = [
 
 const inventoryColumns = [
   column("Produit", "product.name"),
+  column("Code", "product.sku"),
   column("Boutique", "store.name"),
   column("Zone", "storageZone.name"),
+  column("Lot", (row) => row.batchNumber || "Sans lot", { sortBy: "batchNumber" }),
+  column("Expiration", (row) => formatDateOnly(row.expiryDate), { sortBy: "expiryDate" }),
+  column("Statut", "expiryStatus", {
+    render: (row) => formatExpiryStatus(row.expiryStatus),
+  }),
   column("Quantite", (row) => row.quantity || 0, { sortBy: "quantity" }),
   column("Seuil min", (row) => row.minLevel ?? 0),
   column("MAJ", (row) => formatDate(row.updatedAt), { sortBy: "updatedAt" }),
+];
+
+const inventoryLotColumns = [
+  column("Produit", "product.name"),
+  column("Code", "product.sku"),
+  column("Boutique", "store.name"),
+  column("Zone", "storageZone.name"),
+  column("Lot", (row) => row.batchNumber || "Sans lot", { sortBy: "batchNumber" }),
+  column("Expiration", (row) => formatDateOnly(row.expiryDate), { sortBy: "expiryDate" }),
+  column("Statut", "expiryStatus", {
+    render: (row) => formatExpiryStatus(row.expiryStatus),
+  }),
+  column("Jours restants", (row) => (row.daysToExpiry == null ? "--" : row.daysToExpiry)),
+  column("Quantite", (row) => row.quantity || 0, { sortBy: "quantity" }),
+  column("Cout unitaire", (row) => formatMoney(row.unitCost), { sortBy: "unitCost" }),
+];
+
+const inventorySessionColumns = [
+  column("Code", (row) => row.code || "--", { sortBy: "code" }),
+  column("Statut", "status", { render: (row) => renderPill(row.status) }),
+  column("Boutique", "store.name"),
+  column("Zone", "storageZone.name"),
+  column("Demandeur", (row) => formatPerson(row.requestedBy)),
+  column("Lignes", (row) => row.itemsCount ?? 0, { className: "text-center" }),
+  column("Ecarts", (row) => row.discrepancyCount ?? 0, { className: "text-center" }),
+  column("Niveaux", (row) => row.approvalsCount ?? 0, { className: "text-center" }),
+  column("Cree le", (row) => formatDate(row.createdAt), { sortBy: "createdAt" }),
+  column("Cloture le", (row) => formatDate(row.closedAt), { sortBy: "closedAt" }),
 ];
 
 const orderColumns = [
@@ -1016,6 +1131,58 @@ const productColumns = [
   column("Seuil min", (row) => row.minLevel ?? "--", { sortBy: "minLevel" }),
   column("Seuil max", (row) => row.maxLevel ?? "--", { sortBy: "maxLevel" }),
   column("Actif", (row) => renderPill(row.isActive ? "ACTIVE" : "INACTIVE")),
+];
+
+const cashSessionMovementColumns = [
+  {
+    key: "type",
+    label: "Type",
+    render: (row) => renderPill(row.type),
+  },
+  {
+    key: "amount",
+    label: "Montant",
+    render: (row) => formatMoney(row.amount, row.currencyCode),
+  },
+  {
+    key: "reason",
+    label: "Motif",
+    render: (row) => row.reason || "--",
+  },
+  {
+    key: "note",
+    label: "Note",
+    render: (row) => row.note || "--",
+  },
+  {
+    key: "createdByName",
+    label: "Cree par",
+    render: (row) => row.createdByName || "--",
+  },
+  {
+    key: "createdAt",
+    label: "Date",
+    render: (row) => formatDate(row.createdAt),
+  },
+];
+
+const cashSessionColumns = [
+  column("Statut", "status", { render: (row) => renderPill(row.status) }),
+  column("Boutique", "storeName"),
+  column("Caissier", "userName"),
+  column("Zone", "storageZoneName"),
+  column("Fonds initial", (row) => formatMoney(row.openingFloat, row.currencyCode)),
+  column("Ventes cash", (row) => formatMoney(row.totalCashSales, row.currencyCode)),
+  column("Ventes non cash", (row) => formatMoney(row.totalNonCashSales, row.currencyCode)),
+  column("Cash theorique", (row) => formatMoney(row.expectedCash, row.currencyCode)),
+  column("Cash compte", (row) =>
+    row.closingCounted == null ? "--" : formatMoney(row.closingCounted, row.currencyCode)),
+  column("Ecart", (row) =>
+    row.variance == null ? "--" : formatMoney(row.variance, row.currencyCode)),
+  column("Ouverte le", (row) => formatDate(row.openedAt), { sortBy: "openedAt" }),
+  column("Cloturee le", (row) => formatDate(row.closedAt || row.updatedAt), {
+    sortBy: "closedAt",
+  }),
 ];
 
 const articleColumns = [
@@ -1332,7 +1499,7 @@ export const resourceCatalog = {
     rowActions: [
       {
         id: "transfer-complete",
-        label: "Finaliser",
+        label: "Soumettre / Finaliser",
         method: "POST",
         endpoint: (row) => `/api/transfers/${row.id}/complete`,
         visible: (row) => row.status !== "COMPLETED" && row.status !== "CANCELED",
@@ -1344,20 +1511,17 @@ export const resourceCatalog = {
     emptyMessage: "Aucun transfert enregistre.",
   }),
   "/mouvement/retour-fournisseur": createResource({
+    endpoint: "/api/supplier-returns",
     columns: [
-      column("Reference", "reference"),
-      column("Fournisseur", "supplier"),
+      column("Reference", (row) => row.code || row.reference || "--"),
+      column("Fournisseur", "supplier.name"),
+      column("Zone", "storageZone.name"),
       column("Statut", "status", { render: (row) => renderPill(row.status) }),
       column("Date", (row) => formatDate(row.createdAt)),
     ],
-    staticRows: [],
-    searchEnabled: false,
     tableTitle: "Retours fournisseur",
-    tableDescription:
-      "Aucune ressource serveur dediee n'est encore exposee pour ce module.",
+    tableDescription: "Retours de produits vers les fournisseurs avec workflow de validation.",
     emptyMessage: "Aucun retour fournisseur disponible pour le moment.",
-    description:
-      "Cette page est prete mais attend encore l'API metier de retour fournisseur.",
   }),
   "/mouvement/historique-mouvements": createResource({
     endpoint: "/api/inventory-movements",
@@ -1367,13 +1531,32 @@ export const resourceCatalog = {
       "Historique des mouvements d'inventaire remontes par le serveur.",
     emptyMessage: "Aucun mouvement d'inventaire trace.",
   }),
+  "/mouvement/historique-caisse": createResource({
+    endpoint: "/api/cash-sessions",
+    columns: cashSessionColumns,
+    tableTitle: "Historique caisse",
+    tableDescription:
+      "Historique des ouvertures, clotures et ecarts des sessions de caisse.",
+    emptyMessage: "Aucune session de caisse disponible.",
+  }),
   "/etat-stock": createResource({
     endpoint: "/api/inventory",
+    defaultQuery: { detailed: "true" },
     columns: inventoryColumns,
     tableTitle: "Etat de stock",
     tableDescription:
-      "Niveaux de stock actuels par produit, boutique et zone.",
+      "Niveaux de stock actuels par lot, date d'expiration, boutique et zone.",
     emptyMessage: "Aucune ligne d'inventaire disponible.",
+  }),
+  "/lots-peremptions": createResource({
+    endpoint: "/api/inventory",
+    defaultQuery: { detailed: "true" },
+    columns: inventoryLotColumns,
+    tableTitle: "Lots / Peremptions",
+    tableDescription:
+      "Vue dediee des lots, dates d'expiration et alertes sur les peremptions.",
+    emptyMessage: "Aucun lot disponible.",
+    exportFileBaseName: "lots-peremptions",
   }),
   "/etat-consommation": createResource({
     endpoint: "/api/orders",
@@ -1384,20 +1567,21 @@ export const resourceCatalog = {
     emptyMessage: "Aucune vente payee disponible.",
   }),
   "/inventaire/inventaire": createResource({
-    endpoint: "/api/inventory",
-    columns: inventoryColumns,
+    endpoint: "/api/inventory/sessions",
+    columns: inventorySessionColumns,
     tableTitle: "Inventaire",
-    tableDescription: "Stock physique consolide par produit et zone.",
-    emptyMessage: "Aucune donnee d'inventaire disponible.",
+    tableDescription:
+      "Sessions d'inventaire avec snapshot theorique, comptage physique et workflow de validation.",
+    emptyMessage: "Aucune session d'inventaire disponible.",
   }),
   "/inventaire/etat-inventaire": createResource({
-    endpoint: "/api/inventory-movements",
-    defaultQuery: { movementType: "ADJUSTMENT" },
-    columns: inventoryMovementColumns,
+    endpoint: "/api/inventory/sessions",
+    defaultQuery: { status: "CLOSED" },
+    columns: inventorySessionColumns,
     tableTitle: "Etat d'inventaire",
     tableDescription:
-      "Mouvements d'ajustement lies aux inventaires et corrections.",
-    emptyMessage: "Aucun ajustement d'inventaire disponible.",
+      "Inventaires clotures avec ecarts constates et historique des validations.",
+    emptyMessage: "Aucun inventaire cloture disponible.",
   }),
   "/configurations/articles/produits": createResource({
     endpoint: "/api/products",
@@ -2149,6 +2333,22 @@ const stockEntryForm = {
           min: "0",
           step: "0.01",
         },
+        {
+          name: "batchNumber",
+          label: "Numero de lot",
+          type: "text",
+          placeholder: "Ex. LOT-2026-001",
+        },
+        {
+          name: "expiryDate",
+          label: "Date d'expiration",
+          type: "date",
+        },
+        {
+          name: "manufacturedAt",
+          label: "Date de fabrication",
+          type: "date",
+        },
       ]),
     },
   ],
@@ -2165,6 +2365,9 @@ const stockEntryForm = {
       note: compactValue(values.note),
       items: buildDocumentItems(values.items, (item) => ({
         unitCost: numericValue(item.unitCost),
+        batchNumber: compactValue(item.batchNumber),
+        expiryDate: compactValue(item.expiryDate),
+        manufacturedAt: compactValue(item.manufacturedAt),
       })),
     },
   }),
@@ -2397,25 +2600,33 @@ const transferForm = {
 
 const supplierReturnForm = {
   title: "Nouveau retour fournisseur",
-  description: "Formulaire pret pour le module de retour fournisseur.",
-  submitLabel: "Creation indisponible",
-  unavailableMessage:
-    "L'API de retour fournisseur n'est pas encore exposee par le serveur.",
+  description: "Retourne des produits du stock vers un fournisseur avec validation.",
+  submitLabel: "Creer le retour",
+  successMessage: "Retour fournisseur cree.",
   fields: [
     {
       name: "reference",
       label: "Reference",
       type: "text",
-      required: true,
-      placeholder: "Ex. RF-2026-001",
+      placeholder: "Genere automatiquement si vide",
     },
     {
       name: "supplierId",
       label: "Fournisseur",
-      type: "select",
+      type: "search-select",
       optionsEndpoint: "/api/suppliers",
       optionValue: "id",
       optionLabel: "name",
+      required: true,
+    },
+    {
+      name: "storageZoneId",
+      label: "Zone de stockage",
+      type: "search-select",
+      optionsEndpoint: "/api/storage-zones",
+      optionValue: "id",
+      optionLabel: zoneLabel,
+      required: true,
     },
     {
       name: "note",
@@ -2440,14 +2651,39 @@ const supplierReturnForm = {
       ]),
     },
   ],
+  buildRequest: (values) => ({
+    endpoint: "/api/supplier-returns",
+    method: "POST",
+    body: {
+      reference: compactValue(values.reference),
+      supplierId: values.supplierId,
+      storageZoneId: values.storageZoneId,
+      note: compactValue(values.note),
+      items: buildDocumentItems(values.items, (item) => ({
+        reason: compactValue(item.reason),
+      })),
+    },
+  }),
 };
 
-const inventoryForm = {
-  title: "Nouvel ajustement d'inventaire",
-  description: "Fixe ou corrige le stock theorique d'une zone.",
-  submitLabel: "Enregistrer l'ajustement",
-  successMessage: "Ajustement d'inventaire enregistre.",
+const inventorySessionForm = {
+  title: "Nouvel inventaire",
+  description:
+    "Ouvre une nouvelle session d'inventaire, charge les quantites systeme et bloque l'ouverture du suivant jusqu'a la cloture.",
+  endpoint: "/api/inventory/sessions",
+  submitLabel: "Ouvrir l'inventaire",
+  successMessage: "Inventaire ouvert.",
   fields: [
+    {
+      name: "storeId",
+      label: "Boutique",
+      type: "search-select",
+      required: true,
+      optionsEndpoint: "/api/stores",
+      optionValue: "id",
+      optionLabel: "name",
+      placeholder: "Rechercher une boutique...",
+    },
     {
       name: "storageZoneId",
       label: "Zone de stockage",
@@ -2465,10 +2701,44 @@ const inventoryForm = {
       placeholder: "Commentaire d'inventaire",
     },
   ],
+  buildRequest: (values) => ({
+    endpoint: "/api/inventory/sessions",
+    method: "POST",
+    body: {
+      storeId: compactValue(values.storeId),
+      storageZoneId: compactValue(values.storageZoneId),
+      note: compactValue(values.note),
+    },
+  }),
+};
+
+const stockAdjustmentForm = {
+  title: "Nouvel ajustement de stock",
+  description: "Fixe ou corrige le stock theorique d'une zone.",
+  submitLabel: "Enregistrer l'ajustement",
+  successMessage: "Ajustement de stock enregistre.",
+  fields: [
+    {
+      name: "storageZoneId",
+      label: "Zone de stockage",
+      type: "search-select",
+      required: true,
+      optionsEndpoint: "/api/storage-zones",
+      optionValue: "id",
+      optionLabel: zoneLabel,
+      placeholder: "Rechercher une zone de stockage...",
+    },
+    {
+      name: "note",
+      label: "Note globale",
+      type: "textarea",
+      placeholder: "Commentaire d'ajustement",
+    },
+  ],
   repeaters: [
     {
       name: "items",
-      label: "Lignes d'inventaire",
+      label: "Lignes d'ajustement",
       addLabel: "Ajouter une ligne",
       minRows: 1,
       fields: inventoryLineFields(),
@@ -2519,6 +2789,18 @@ const productForm = {
       required: true,
       min: "0",
       step: "0.01",
+    },
+    {
+      name: "currencyCode",
+      label: "Devise de saisie",
+      type: "search-select",
+      required: true,
+      optionsEndpoint: "/api/currency-settings",
+      optionValue: "code",
+      optionLabel: (item) => item?.code || item?.name || "--",
+      placeholder: "Choisir la devise...",
+      usePrimaryCurrencyDefault: true,
+      description: "Le prix saisi sera enregistre dans cette devise.",
     },
     {
       name: "purchaseUnitPrice",
@@ -2607,6 +2889,7 @@ const productForm = {
       description: compactValue(values.description),
       imageUrl: compactValue(values.imageUrl),
       unitPrice: numericValue(values.unitPrice) ?? 0,
+      currencyCode: compactValue(values.currencyCode),
       purchaseUnitPrice: numericValue(values.purchaseUnitPrice),
       minLevel: numericValue(values.minLevel),
       maxLevel: numericValue(values.maxLevel),
@@ -2629,6 +2912,7 @@ const buildProductRequest = (values, kind) => ({
     description: compactValue(values.description),
     imageUrl: compactValue(values.imageUrl),
     unitPrice: numericValue(values.unitPrice) ?? 0,
+    currencyCode: compactValue(values.currencyCode),
     purchaseUnitPrice: numericValue(values.purchaseUnitPrice),
     minLevel: numericValue(values.minLevel),
     maxLevel: numericValue(values.maxLevel),
@@ -2998,7 +3282,16 @@ const approvalFlowForm = {
   submitLabel: "Creer le flow",
   successMessage: "Flow de validation cree.",
   fields: [
-    { name: "code", label: "Code", type: "text", required: true, placeholder: "Ex. SUPPLY_REQUEST" },
+    {
+      name: "code",
+      label: "Code",
+      type: "search-select",
+      required: true,
+      optionsEndpoint: "/api/approval-flows/catalog",
+      optionValue: "code",
+      optionLabel: (item) => `${item?.code || "--"} - ${item?.name || "--"}`,
+      placeholder: "Choisir un code de validation",
+    },
     { name: "name", label: "Nom", type: "text", required: true, placeholder: "Ex. Validation requisition" },
   ],
   repeaters: [
@@ -3440,14 +3733,12 @@ export const createCatalog = {
   "/mouvement/retour-fournisseur": createForm({ createPath: "/mouvement/retour-fournisseur/nouveau", ...supplierReturnForm }),
   "/etat-stock": createForm({
     createPath: "/etat-stock/nouveau",
-    ...inventoryForm,
+    ...stockAdjustmentForm,
     title: "Nouvel ajustement de stock",
   }),
-  "/inventaire/inventaire": createForm({ createPath: "/inventaire/inventaire/nouveau", ...inventoryForm }),
-  "/inventaire/etat-inventaire": createForm({
-    createPath: "/inventaire/etat-inventaire/nouveau",
-    ...inventoryForm,
-    title: "Nouvel ajustement d'etat d'inventaire",
+  "/inventaire/inventaire": createForm({
+    createPath: "/inventaire/inventaire/nouveau",
+    ...inventorySessionForm,
   }),
   "/configurations/articles/produits": createForm({
     createPath: "/configurations/articles/produits/nouveau",
@@ -3563,6 +3854,8 @@ const basePatchBuilder = (builder, endpointBuilder) => (values, id) => {
 };
 
 const isDraftStatus = (row) => row?.status === "DRAFT";
+const isDraftOrRejectedWithRawDraft = (row) =>
+  row?.rawStatus === "DRAFT" && ["DRAFT", "REJECTED"].includes(row?.status);
 const isPendingStatus = (row) => row?.status === "PENDING";
 const alwaysMutable = () => true;
 const productDeactivateConfig = {
@@ -3583,6 +3876,7 @@ const productFormValues = (row) => ({
   description: row.description || "",
   imageUrl: row.imageUrl || "",
   unitPrice: toAmountInputValue(row.unitPrice),
+  currencyCode: row.currencyCode || "",
   purchaseUnitPrice: toAmountInputValue(row.purchaseUnitPrice),
   minLevel: toAmountInputValue(row.minLevel),
   maxLevel: toAmountInputValue(row.maxLevel),
@@ -3668,8 +3962,8 @@ export const editCatalog = {
       (id) => `/api/purchase-orders/${id}`,
     ),
     deleteRequest: (id) => ({ endpoint: `/api/purchase-orders/${id}`, method: "DELETE" }),
-    canEdit: isDraftStatus,
-    canDelete: isDraftStatus,
+    canEdit: isDraftOrRejectedWithRawDraft,
+    canDelete: isDraftOrRejectedWithRawDraft,
     pdfUrl: (row) => `/api/purchase-orders/${row.id}/pdf`,
     detailKind: "purchase-order",
   },
@@ -3696,8 +3990,8 @@ export const editCatalog = {
       (id) => `/api/purchase-orders/${id}`,
     ),
     deleteRequest: (id) => ({ endpoint: `/api/purchase-orders/${id}`, method: "DELETE" }),
-    canEdit: isDraftStatus,
-    canDelete: isDraftStatus,
+    canEdit: isDraftOrRejectedWithRawDraft,
+    canDelete: isDraftOrRejectedWithRawDraft,
     pdfUrl: (row) => `/api/purchase-orders/${row.id}/pdf`,
     detailKind: "purchase-order",
   },
@@ -3715,6 +4009,9 @@ export const editCatalog = {
       note: row.note || "",
       items: documentItemsToFormValues(row.items, (item) => ({
         unitCost: toAmountInputValue(item.unitCost),
+        batchNumber: item.batchNumber || "",
+        expiryDate: toDateInputValue(item.expiryDate),
+        manufacturedAt: toDateInputValue(item.manufacturedAt),
       })),
     }),
     buildUpdateRequest: (values, id, row) => ({
@@ -3729,12 +4026,21 @@ export const editCatalog = {
           row?.items?.some((item) => Number(item.quantity || 0) < 0) ? "OUT" : "IN",
         items: buildDocumentItems(values.items, (item) => ({
           unitCost: numericValue(item.unitCost),
+          batchNumber: compactValue(item.batchNumber),
+          expiryDate: compactValue(item.expiryDate),
+          manufacturedAt: compactValue(item.manufacturedAt),
         })),
       },
     }),
     deleteRequest: (id) => ({ endpoint: `/api/stock-entries/${id}`, method: "DELETE" }),
-    canEdit: (row) => row?.sourceType === "DIRECT" && row?.status === "PENDING",
-    canDelete: (row) => row?.sourceType === "DIRECT" && row?.status === "PENDING",
+    canEdit: (row) =>
+      row?.sourceType === "DIRECT" &&
+      row?.rawStatus === "PENDING" &&
+      ["PENDING", "REJECTED"].includes(row?.status),
+    canDelete: (row) =>
+      row?.sourceType === "DIRECT" &&
+      row?.rawStatus === "PENDING" &&
+      ["PENDING", "REJECTED"].includes(row?.status),
     pdfUrl: (row) => `/api/stock-entries/${row.id}/pdf`,
     detailKind: "stock-entry",
   },
@@ -3758,8 +4064,58 @@ export const editCatalog = {
     ),
     pdfUrl: (row) => `/api/transfers/${row.id}/pdf`,
     deleteRequest: (id) => ({ endpoint: `/api/transfers/${id}`, method: "DELETE" }),
-    canEdit: isDraftStatus,
-    canDelete: isDraftStatus,
+    canEdit: isDraftOrRejectedWithRawDraft,
+    canDelete: isDraftOrRejectedWithRawDraft,
+    detailKind: "transfer",
+  },
+  "/mouvement/retour-fournisseur": {
+    ...supplierReturnForm,
+    editPath: "/mouvement/retour-fournisseur/modifier",
+    detailPath: "/mouvement/retour-fournisseur/detail",
+    detailEndpoint: (id) => `/api/supplier-returns/${id}`,
+    buildFormValues: (row) => ({
+      reference: row.code || row.reference || "",
+      supplierId: row.supplierId || row.supplier?.id || "",
+      storageZoneId: row.storageZoneId || row.storageZone?.id || "",
+      note: row.note || "",
+      items: documentItemsToFormValues(row.items, (item) => ({
+        reason: item.reason || "",
+      })),
+    }),
+    buildUpdateRequest: basePatchBuilder(
+      supplierReturnForm.buildRequest,
+      (id) => `/api/supplier-returns/${id}`,
+    ),
+    deleteRequest: (id) => ({ endpoint: `/api/supplier-returns/${id}`, method: "DELETE" }),
+    canEdit: (row) => ["DRAFT", "REJECTED"].includes(row?.status),
+    canDelete: (row) => ["DRAFT", "REJECTED"].includes(row?.status),
+    detailKind: "supplier-return",
+  },
+  "/mouvement/historique-caisse": {
+    editPath: null,
+    detailPath: "/mouvement/historique-caisse/detail",
+    detailEndpoint: (id) => `/api/cash-sessions/${id}`,
+    canEdit: () => false,
+    canDelete: () => false,
+    detailKind: "cash-session",
+  },
+  "/inventaire/inventaire": {
+    ...inventorySessionForm,
+    editPath: "/inventaire/inventaire/modifier",
+    detailPath: "/inventaire/inventaire/detail",
+    detailEndpoint: (id) => `/api/inventory/sessions/${id}`,
+    canEdit: () => false,
+    canDelete: () => false,
+    detailKind: "inventory-session",
+  },
+  "/inventaire/etat-inventaire": {
+    ...inventorySessionForm,
+    editPath: "/inventaire/etat-inventaire/modifier",
+    detailPath: "/inventaire/etat-inventaire/detail",
+    detailEndpoint: (id) => `/api/inventory/sessions/${id}`,
+    canEdit: () => false,
+    canDelete: () => false,
+    detailKind: "inventory-session",
   },
   "/configurations/articles/produits": {
     ...componentProductForm,
@@ -4284,14 +4640,16 @@ export const getCreatePageConfig = (path) =>
   createPageCatalog[normalizePath(path)] || null;
 
 const editPageCatalog = Object.fromEntries(
-  Object.entries(editCatalog).map(([resourcePath, config]) => [
-    normalizePath(config.editPath),
-    {
-      ...config,
-      resourcePath,
-      mode: "edit",
-    },
-  ]),
+  Object.entries(editCatalog)
+    .filter(([, config]) => config.editPath)
+    .map(([resourcePath, config]) => [
+      normalizePath(config.editPath),
+      {
+        ...config,
+        resourcePath,
+        mode: "edit",
+      },
+    ]),
 );
 
 export const getEditPageConfig = (path) =>
@@ -4398,7 +4756,7 @@ const redirectRoutes = sidebarItems
   }));
 
 const workspaceRoutes = allRouteMeta
-  .filter((item) => item.path !== dashboardMeta.path)
+  .filter((item) => item.path !== dashboardMeta.path && item.path !== settingsMeta.path)
   .map((item) => ({
     path: item.path.slice(1),
     element: <AdminResourcePage />,
@@ -4406,7 +4764,12 @@ const workspaceRoutes = allRouteMeta
 
 const createRoutes = Object.values(createPageCatalog).map((item) => ({
   path: item.createPath.slice(1),
-  element: <AdminCreatePage />,
+  element:
+    normalizePath(item.createPath) === "/inventaire/inventaire/nouveau" ? (
+      <AdminInventoryCountPage />
+    ) : (
+      <AdminCreatePage />
+    ),
 }));
 
 const editRoutes = Object.values(editPageCatalog).map((item) => ({
@@ -4433,6 +4796,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/dashboard" replace /> },
           { path: "dashboard", element: <Dashboard /> },
+          { path: "settings", element: <SettingsPage /> },
           {
             path: "configurations/articles/produits-vente",
             element: <Navigate to="/configurations/articles/articles" replace />,

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Minus, Plus, Trash2, X } from "lucide-react";
 import Badge from "../components/ui/badge";
 import Button from "../components/ui/button";
 import Input from "../components/ui/input";
@@ -8,11 +8,13 @@ import DropdownSort from "../components/ui/dropdownSort";
 import PaymentModal from "../components/ui/paymentModal";
 import { resolveCategoryAvatar } from "./ProductsList";
 import { useProductsData } from "../hooks/useProductsData";
-import { apiPost, buildUrl } from "../services/apiClient";
+import { apiGet, apiPost, buildUrl } from "../services/apiClient";
 import useAuthStore from "../stores/authStore";
 import useCounterStore from "../stores/counterStore";
 import useCurrencyStore from "../stores/currencyStore";
+import useUserPreferenceStore from "../stores/userPreferenceStore";
 import useToastStore from "../stores/toastStore";
+import useUiStore from "../stores/uiStore";
 import {
   buildSecondaryRateLabel,
   convertToPrimaryAmount,
@@ -32,6 +34,8 @@ const CounterList = () => {
   const clearCart = useCounterStore((state) => state.clearCart);
   const showToast = useToastStore((state) => state.showToast);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [cashSession, setCashSession] = useState(null);
+  const [cashSessionLoading, setCashSessionLoading] = useState(false);
   const search = useCounterStore((state) => state.search);
   const setSearch = useCounterStore((state) => state.setSearch);
   const filterValues = useCounterStore((state) => state.filterValues);
@@ -41,6 +45,9 @@ const CounterList = () => {
   const user = useAuthStore((state) => state.user);
   const currencySettings = useCurrencyStore((state) => state.settings);
   const loadCurrencySettings = useCurrencyStore((state) => state.loadSettings);
+  const userPreferences = useUserPreferenceStore((state) => state.preferences);
+  const isMobileCartOpen = useUiStore((state) => state.isMobileCartOpen);
+  const closeMobileCart = useUiStore((state) => state.closeMobileCart);
 
   const resolveProductImage = (product) =>
     product?.imageUrl ? buildUrl(product.imageUrl) : resolveCategoryAvatar(product?.category, product?.id);
@@ -62,6 +69,41 @@ const CounterList = () => {
     loadCurrencySettings();
   }, [loadCurrencySettings]);
 
+  const loadCashSession = async ({ silent = false } = {}) => {
+    if (!silent) {
+      setCashSessionLoading(true);
+    }
+
+    try {
+      const session = await apiGet("/api/cash-sessions/current");
+      setCashSession(session || null);
+    } catch (error) {
+      if (error.status === 404) {
+        setCashSession(null);
+      } else if (!silent) {
+        showToast({
+          title: "Caisse",
+          message: error.message || "Impossible de charger l'etat de la caisse.",
+          variant: "warning",
+        });
+      }
+    } finally {
+      if (!silent) {
+        setCashSessionLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadCashSession();
+  }, []);
+
+  useEffect(() => {
+    if (cartItems.length === 0) {
+      closeMobileCart();
+    }
+  }, [cartItems.length, closeMobileCart]);
+
   const filteredProducts = useMemo(() => {
     const searchQuery = search.trim().toLowerCase();
     const keywordQuery = (filterValues.keyword ?? "").trim().toLowerCase();
@@ -79,10 +121,25 @@ const CounterList = () => {
       filterValues.category && filterValues.category !== "all"
         ? filterValues.category.toLowerCase()
         : "";
+    const familyFilter =
+      filterValues.family && filterValues.family !== "all"
+        ? filterValues.family.toLowerCase()
+        : "";
+    const subFamilyFilter =
+      filterValues.subFamily && filterValues.subFamily !== "all"
+        ? filterValues.subFamily.toLowerCase()
+        : "";
+    const collectionFilter =
+      filterValues.collection && filterValues.collection !== "all"
+        ? filterValues.collection.toLowerCase()
+        : "";
 
     return productList.filter((product) => {
       const productName = product.product?.toLowerCase() ?? "";
       const category = product.category?.toLowerCase() ?? "";
+      const family = product.family?.toLowerCase() ?? "";
+      const subFamily = product.subFamily?.toLowerCase() ?? "";
+      const collection = product.collection?.toLowerCase() ?? "";
       const status = product.status?.toLowerCase() ?? "";
       const stock = product.stock?.toLowerCase() ?? "";
 
@@ -93,8 +150,20 @@ const CounterList = () => {
         const categoryValue = product.category?.toLowerCase() ?? "";
         if (categoryValue !== categoryFilter) return false;
       }
+      if (familyFilter) {
+        const familyValue = product.family?.toLowerCase() ?? "";
+        if (familyValue !== familyFilter) return false;
+      }
+      if (subFamilyFilter) {
+        const subFamilyValue = product.subFamily?.toLowerCase() ?? "";
+        if (subFamilyValue !== subFamilyFilter) return false;
+      }
+      if (collectionFilter) {
+        const collectionValue = product.collection?.toLowerCase() ?? "";
+        if (collectionValue !== collectionFilter) return false;
+      }
 
-      const haystack = `${productName} ${category} ${status} ${stock}`;
+      const haystack = `${productName} ${category} ${family} ${subFamily} ${collection} ${status} ${stock}`;
       if (hasSearch && !haystack.includes(searchQuery)) return false;
       if (hasKeyword && !haystack.includes(keywordQuery)) return false;
 
@@ -137,6 +206,34 @@ const CounterList = () => {
 
     return next;
   }, [filteredProducts, sortValues]);
+
+  const categoryFilterItems = useMemo(() => {
+    const values = [...new Set(productList.map((item) => item.category).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "fr"),
+    );
+    return [{ id: "all", label: "Toutes" }, ...values.map((value) => ({ id: value, label: value }))];
+  }, [productList]);
+
+  const familyFilterItems = useMemo(() => {
+    const values = [...new Set(productList.map((item) => item.family).filter(Boolean).filter((value) => value !== "N/A"))].sort((a, b) =>
+      a.localeCompare(b, "fr"),
+    );
+    return [{ id: "all", label: "Toutes" }, ...values.map((value) => ({ id: value, label: value }))];
+  }, [productList]);
+
+  const subFamilyFilterItems = useMemo(() => {
+    const values = [...new Set(productList.map((item) => item.subFamily).filter(Boolean).filter((value) => value !== "N/A"))].sort((a, b) =>
+      a.localeCompare(b, "fr"),
+    );
+    return [{ id: "all", label: "Toutes" }, ...values.map((value) => ({ id: value, label: value }))];
+  }, [productList]);
+
+  const collectionFilterItems = useMemo(() => {
+    const values = [...new Set(productList.map((item) => item.collection).filter(Boolean).filter((value) => value !== "N/A"))].sort((a, b) =>
+      a.localeCompare(b, "fr"),
+    );
+    return [{ id: "all", label: "Toutes" }, ...values.map((value) => ({ id: value, label: value }))];
+  }, [productList]);
 
   const [page, setPage] = useState(1);
   const pageSize = 15;
@@ -205,7 +302,14 @@ const CounterList = () => {
     return items;
   };
 
-  const handleConfirmSale = async ({ amount, method, customer, pointsEarned }) => {
+  const handleConfirmSale = async ({
+    amount,
+    originalAmountReceived,
+    paymentCurrencyCode,
+    method,
+    customer,
+    pointsEarned,
+  }) => {
     if (amount < totalAmount) {
       showToast({
         title: "Paiement insuffisant",
@@ -220,6 +324,8 @@ const CounterList = () => {
         customerId: customer?.id || undefined,
         paymentMethod: method,
         amountReceived: amount,
+        originalAmountReceived,
+        paymentCurrencyCode,
         pointsEarned,
         items: cartItems.map((item) => ({
           productId: item.id,
@@ -257,51 +363,69 @@ const CounterList = () => {
         variant: "success",
       });
 
-      try {
-        await printReceiptViaLocalService({
-          order: createdOrder,
-          amountReceived: amount,
-          cashierName:
-            [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-            user?.email ||
-            "Caissier",
-          storeName: createdOrder?.store?.name || user?.storeName || "Boutique",
-          businessName: createdOrder?.store?.name || user?.storeName || "NeoPharma",
-        });
-      } catch (printError) {
+      if (userPreferences.autoPrintReceipt) {
         try {
-          printSaleReceipt({
-            order: createdOrder,
-            amountReceived: amount,
-            cashierName:
-              [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-              user?.email ||
-              "Caissier",
-            storeName: createdOrder?.store?.name || user?.storeName || "Boutique",
-            businessName: createdOrder?.store?.name || user?.storeName || "NeoPharma",
-          });
-          showToast({
-            title: "Service local indisponible",
-            message:
-              printError.message ||
-              "Le ticket a ete bascule vers l'impression navigateur.",
-            variant: "warning",
-          });
-        } catch (browserPrintError) {
-          showToast({
-            title: "Impression impossible",
-            message:
-              printError.message ||
-              browserPrintError.message ||
-              "Le ticket n'a pas pu etre imprime.",
-            variant: "warning",
-          });
+          if (userPreferences.printerMode === "local_service") {
+            await printReceiptViaLocalService({
+              order: createdOrder,
+              amountReceived: amount,
+              cashierName:
+                [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+                user?.email ||
+                "Caissier",
+              storeName: createdOrder?.store?.name || user?.storeName || "Boutique",
+              businessName: createdOrder?.store?.name || user?.storeName || "NeoPharma",
+              printerServiceUrl: userPreferences.printerServiceUrl || undefined,
+              printerName: userPreferences.printerName || undefined,
+            });
+          } else {
+            printSaleReceipt({
+              order: createdOrder,
+              amountReceived: amount,
+              cashierName:
+                [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+                user?.email ||
+                "Caissier",
+              storeName: createdOrder?.store?.name || user?.storeName || "Boutique",
+              businessName: createdOrder?.store?.name || user?.storeName || "NeoPharma",
+            });
+          }
+        } catch (printError) {
+          try {
+            printSaleReceipt({
+              order: createdOrder,
+              amountReceived: amount,
+              cashierName:
+                [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+                user?.email ||
+                "Caissier",
+              storeName: createdOrder?.store?.name || user?.storeName || "Boutique",
+              businessName: createdOrder?.store?.name || user?.storeName || "NeoPharma",
+            });
+            showToast({
+              title: "Service local indisponible",
+              message:
+                printError.message ||
+                "Le ticket a ete bascule vers l'impression navigateur.",
+              variant: "warning",
+            });
+          } catch (browserPrintError) {
+            showToast({
+              title: "Impression impossible",
+              message:
+                printError.message ||
+                browserPrintError.message ||
+                "Le ticket n'a pas pu etre imprime.",
+              variant: "warning",
+            });
+          }
         }
       }
 
       clearCart();
       setIsPaymentOpen(false);
       await refreshProducts();
+      await loadCashSession({ silent: true });
     } catch (error) {
       showToast({
         title: "Erreur",
@@ -321,12 +445,27 @@ const CounterList = () => {
               <p className="text-sm text-text-secondary">
                 Selectionnez les articles a ajouter au panier.
               </p>
-              {exchangeRateLabel ? (
+              {exchangeRateLabel && userPreferences.showSecondaryAmounts ? (
                 <p className="mt-1 text-xs text-text-secondary">{exchangeRateLabel}</p>
               ) : null}
             </div>
             <div className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-secondary sm:w-auto">
-              Articles: <span className="font-semibold text-text-primary">{totalItems}</span>
+              <div className="flex flex-col items-end gap-1">
+                <span>
+                  Articles: <span className="font-semibold text-text-primary">{totalItems}</span>
+                </span>
+                <span>
+                  Caisse:{" "}
+                  <span
+                    className={[
+                      "font-semibold",
+                      cashSession ? "text-success" : "text-warning",
+                    ].join(" ")}
+                  >
+                    {cashSessionLoading ? "Chargement..." : cashSession ? "Ouverte" : "Fermee"}
+                  </span>
+                </span>
+              </div>
             </div>
           </div>
 
@@ -346,6 +485,13 @@ const CounterList = () => {
                   onApply={setFilterValues}
                   showDateRange={false}
                   showCategory
+                  showFamily
+                  showSubFamily
+                  showCollection
+                  categoryItems={categoryFilterItems}
+                  familyItems={familyFilterItems}
+                  subFamilyItems={subFamilyFilterItems}
+                  collectionItems={collectionFilterItems}
                 />
                 <DropdownSort onApply={setSortValues} />
               </div>
@@ -381,7 +527,9 @@ const CounterList = () => {
                         <div className="flex-1">
                           <div>
                             <p className="text-[11px] text-text-secondary">
-                              {product.category}
+                              {[product.collection, product.category, product.family, product.subFamily]
+                                .filter((value) => value && value !== "N/A")
+                                .join(" / ") || "N/A"}
                             </p>
                             <h3 className="text-[13px] font-semibold text-text-primary">
                               {product.product}
@@ -404,7 +552,7 @@ const CounterList = () => {
                               )}
                             </span>
                           </span>
-                          {secondaryEnabled ? (
+                          {secondaryEnabled && userPreferences.showSecondaryAmounts ? (
                             <span className="text-[10px] text-text-secondary">
                               {formatSecondaryAmount(
                                 product.price,
@@ -423,7 +571,7 @@ const CounterList = () => {
                         className={[
                           "rounded-lg px-3 py-2 text-sm font-medium",
                           isOut
-                            ? "cursor-not-allowed bg-neutral-200 text-text-secondary dark:bg-surface dark:border dark:border-border"
+                            ? "cursor-not-allowed bg-background text-text-secondary dark:bg-surface dark:border dark:border-border"
                             : "bg-primary text-white hover:bg-primary/90",
                         ].join(" ")}
                       >
@@ -468,7 +616,7 @@ const CounterList = () => {
                     className={[
                       "rounded-lg border px-3 py-1.5 text-sm font-medium",
                       isActive
-                        ? "border-[#b0bbb7] bg-[#b0bbb7] text-text-primary dark:border-[#1D473F] dark:bg-[#1D473F] dark:text-white"
+                        ? "border-header bg-header text-text-primary dark:border-secondary dark:bg-secondary dark:text-white"
                         : "border-border bg-surface text-text-primary hover:bg-surface/70 dark:bg-surface/70 dark:text-text-primary",
                     ].join(" ")}
                   >
@@ -480,7 +628,36 @@ const CounterList = () => {
           </div>
         </div>
 
-        <div className="sideBloc flex h-full flex-col">
+        {isMobileCartOpen ? (
+          <button
+            type="button"
+            aria-label="Fermer le panier"
+            className="fixed inset-0 z-40 bg-black/40 xl:hidden"
+            onClick={closeMobileCart}
+          />
+        ) : null}
+
+        <div
+          className={[
+            "sideBloc flex h-full flex-col",
+            "fixed inset-y-0 right-0 z-50 w-[92vw] max-w-sm transform transition-transform duration-300 xl:static xl:z-auto xl:w-auto xl:max-w-none xl:translate-x-0",
+            isMobileCartOpen ? "translate-x-0" : "translate-x-full xl:translate-x-0",
+          ].join(" ")}
+        >
+          <div className="mb-3 flex items-center justify-between xl:hidden">
+            <div>
+              <h2 className="text-lg font-semibold text-text-primary">Panier</h2>
+              <p className="text-xs text-text-secondary">{cartItems.length} article(s)</p>
+            </div>
+            <button
+              type="button"
+              onClick={closeMobileCart}
+              className="rounded-lg p-2 text-text-primary hover:bg-surface/70"
+              aria-label="Fermer le panier"
+            >
+              <X size={18} strokeWidth={1.5} />
+            </button>
+          </div>
           <div className="rounded-xl border border-border bg-surface p-3">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -495,7 +672,7 @@ const CounterList = () => {
                       {formatPrimaryAmount(totalAmount, currencySettings)}
                     </span>
                   </span>
-                  {secondaryEnabled ? (
+                  {secondaryEnabled && userPreferences.showSecondaryAmounts ? (
                     <span className="text-[10px] text-text-secondary">
                       {formatSecondaryAmount(totalAmount, currencySettings)}
                     </span>
@@ -526,7 +703,11 @@ const CounterList = () => {
                       />
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-text-primary">{item.product}</p>
-                        <p className="text-xs text-text-secondary">{item.category}</p>
+                        <p className="text-xs text-text-secondary">
+                          {[item.collection, item.category, item.family, item.subFamily]
+                            .filter((value) => value && value !== "N/A")
+                            .join(" / ") || "N/A"}
+                        </p>
                         <p className="text-xs text-text-secondary">
                           {formatConvertedPrimaryAmount(
                             item.price,
@@ -535,7 +716,7 @@ const CounterList = () => {
                           )}{" "}
                           / unite
                         </p>
-                        {secondaryEnabled ? (
+                        {secondaryEnabled && userPreferences.showSecondaryAmounts ? (
                           <p className="text-[10px] text-text-secondary">
                             {formatSecondaryAmount(
                               item.price,
@@ -588,13 +769,20 @@ const CounterList = () => {
                 label="Valider la vente"
                 variant="primary"
                 size="default"
-                disabled={cartItems.length === 0}
-                onClick={() => setIsPaymentOpen(true)}
+                disabled={cartItems.length === 0 || !cashSession}
+                onClick={() => {
+                  setIsPaymentOpen(true);
+                }}
                 className={[
                   "w-full",
-                  cartItems.length === 0 ? "cursor-not-allowed opacity-70" : "",
+                  cartItems.length === 0 || !cashSession ? "cursor-not-allowed opacity-70" : "",
                 ].join(" ")}
               />
+              {!cashSession ? (
+                <p className="text-xs text-text-secondary">
+                  Ouvrez la caisse depuis `Parametres` avant d'encaisser une vente.
+                </p>
+              ) : null}
               <Button
                 label="Vider le panier"
                 variant="default"
@@ -617,6 +805,7 @@ const CounterList = () => {
         cartItems={cartItems}
         totalAmount={totalAmount}
         currencySettings={currencySettings}
+        cashSession={cashSession}
         onConfirm={handleConfirmSale}
       />
     </>
@@ -624,3 +813,4 @@ const CounterList = () => {
 };
 
 export default CounterList;
+

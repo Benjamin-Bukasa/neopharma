@@ -18,7 +18,7 @@ const buildInventoryMap = (inventory = []) => {
 };
 
 const resolveStockLabel = (quantity, minLevel) => {
-  if (quantity <= 0) return "Epuis\u00e9";
+  if (quantity <= 0) return "Epuisé";
   if (minLevel && quantity <= minLevel) return "Faible";
   return "En stock";
 };
@@ -76,6 +76,9 @@ const mapProducts = (products, inventoryMap) =>
       product: product.name,
       imageUrl: product.imageUrl || "",
       category: product.category?.name || "N/A",
+      family: product.family?.name || "N/A",
+      subFamily: product.subFamily?.name || "N/A",
+      collection: product.category?.collection?.name || "N/A",
       status: product.isActive ? "Actif" : "Inactif",
       quantity,
       stock:

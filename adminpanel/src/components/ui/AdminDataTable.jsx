@@ -185,7 +185,7 @@ const AdminDataTable = ({
               items={resolvedExportItems}
               onSelect={(item) => onExportSelect(item)}
               disabled={exportDisabled}
-              buttonClassName="rounded-lg border border-border bg-surface px-4 py-2 font-medium text-text-primary hover:bg-background dark:bg-surface dark:hover:bg-background/70"
+              buttonClassName="rounded-lg bg-transparent px-4 py-2 font-medium text-text-primary hover:bg-surface/70 dark:bg-transparent dark:hover:bg-surface/70"
             />
           ) : null}
 
@@ -220,7 +220,7 @@ const AdminDataTable = ({
 
       <div className="table-scroll mt-4 overflow-auto rounded-xl border border-border bg-surface">
         <table className="min-w-[780px] w-full border-collapse text-sm xl:min-w-full">
-          <thead className="sticky top-0 z-10 bg-[#b0bbb7] dark:bg-[#1D473F]">
+          <thead className="sticky top-0 z-10 bg-header dark:bg-secondary">
             <tr>
               {showSelection ? (
                 <th className="border-b border-border px-4 py-4 text-left">
@@ -376,7 +376,7 @@ const AdminDataTable = ({
                   className={[
                     "rounded-lg border px-3 py-1.5 text-sm font-medium transition",
                     isActive
-                      ? "border-[#b0bbb7] bg-[#b0bbb7] text-text-primary dark:border-[#1D473F] dark:bg-[#1D473F] dark:text-white"
+                      ? "border-header bg-header text-text-primary dark:border-secondary dark:bg-secondary dark:text-white"
                       : "border-border bg-surface text-text-primary hover:bg-background",
                   ].join(" ")}
                 >

@@ -251,7 +251,7 @@ const CustomerCreateModal = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-neutral-200 px-4 py-2 text-sm font-medium text-text-primary hover:bg-neutral-300 dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
+            className="rounded-lg bg-background px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
           >
             Annuler
           </button>

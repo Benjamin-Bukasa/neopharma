@@ -36,8 +36,8 @@ const DropdownSort = ({
       }
       buttonClassName={[
         "px-4 py-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
-        "bg-neutral-300 text-text-primary focus:ring-neutral-400",
-        "dark:bg-surface dark:text-text-primary dark:border dark:border-border dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50 dark:focus:border-neutral-600/60",
+        "bg-transparent text-text-primary hover:bg-surface/70 focus:ring-secondary/40",
+        "dark:bg-transparent dark:text-text-primary dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50",
         buttonClassName,
       ].join(" ")}
       menuClassName="w-[260px] shadow-xl"
@@ -170,7 +170,7 @@ const DropdownSort = ({
             <button
               type="button"
               onClick={handleResetAll}
-              className="rounded-lg bg-neutral-200 px-3 py-2 text-sm font-medium text-text-primary hover:bg-neutral-300 dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
+              className="rounded-lg bg-background px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
             >
               Réinitialiser
             </button>

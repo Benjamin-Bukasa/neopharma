@@ -21,6 +21,8 @@ router.post(
   upload.single("file"),
   userController.importUsers
 );
+router.get("/me/preferences", auth, userController.getMyPreferences);
+router.patch("/me/preferences", auth, userController.updateMyPreferences);
 router.get("/:id", auth, userController.getUser);
 router.post(
   "/",

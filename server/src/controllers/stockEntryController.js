@@ -15,8 +15,75 @@ const {
 const { sendExport } = require("../utils/exporter");
 const { emitToStore } = require("../socket");
 const { buildStockEntryPdf } = require("../services/stockEntryPdf");
+const {
+  ensureInventoryLotTables,
+  attachStockEntryLots,
+  setStockEntryItemLots,
+  incrementInventoryLot,
+  consumeInventoryLotsFefo,
+  emitLotExpiryNotifications,
+} = require("../utils/inventoryLotStore");
+const {
+  loadApprovalFlow,
+  getDocumentApprovals,
+  getDocumentApprovalMap,
+  prepareDocumentApprovals,
+  decideDocumentApproval,
+} = require("../utils/documentApprovalStore");
 
 const toNumber = (value) => Number(value || 0);
+const STOCK_ENTRY_DOCUMENT_TYPE = "STOCK_ENTRY";
+
+const resolveStockEntryFlowCodes = (sourceType, operationType = "IN") => {
+  const normalizedOperationType = operationType === "OUT" ? "OUT" : "IN";
+  if (sourceType === "DIRECT" && normalizedOperationType === "OUT") {
+    return ["DIRECT_STOCK_EXIT", "STOCK_EXIT"];
+  }
+  if (sourceType === "DIRECT") {
+    return ["DIRECT_STOCK_ENTRY", "STOCK_ENTRY"];
+  }
+  if (normalizedOperationType === "OUT") {
+    return ["STOCK_EXIT"];
+  }
+  return ["STOCK_ENTRY"];
+};
+
+const mapStockEntryStatus = (rawStatus, approvals = []) => {
+  if (!approvals.length) return rawStatus;
+  if (rawStatus === "POSTED") return rawStatus;
+  if (approvals.some((item) => item.status === "REJECTED")) return "REJECTED";
+  if (rawStatus === "APPROVED") return rawStatus;
+  return "SUBMITTED";
+};
+
+const decorateStockEntriesWithApprovals = async (records, { includeApprovals = true } = {}) => {
+  const list = Array.isArray(records) ? records.filter(Boolean) : records ? [records] : [];
+  if (!list.length) return Array.isArray(records) ? [] : records;
+
+  const approvalMap = await getDocumentApprovalMap(
+    list[0].tenantId,
+    STOCK_ENTRY_DOCUMENT_TYPE,
+    list.map((item) => item.id),
+  );
+
+  const mapped = list.map((item) => {
+    const approvals = approvalMap.get(item.id) || [];
+    return {
+      ...item,
+      rawStatus: item.status,
+      status: mapStockEntryStatus(item.status, approvals),
+      ...(includeApprovals ? { approvals } : {}),
+    };
+  });
+
+  return Array.isArray(records) ? mapped : mapped[0];
+};
+
+const canModifyStockEntry = async (tenantId, entry) => {
+  if (entry.sourceType !== "DIRECT" || entry.status !== "PENDING") return false;
+  const approvals = await getDocumentApprovals(tenantId, STOCK_ENTRY_DOCUMENT_TYPE, entry.id);
+  return !approvals.length || approvals.some((item) => item.status === "REJECTED");
+};
 
 const hydrateStockEntriesWithCurrencyCodes = async (records) => {
   const list = Array.isArray(records)
@@ -40,7 +107,14 @@ const hydrateStockEntriesWithCurrencyCodes = async (records) => {
     items: attachCurrencyCodes(entry.items || [], itemCurrencyMap),
   }));
 
-  return Array.isArray(records) ? hydrated : hydrated[0];
+  const withLots = await Promise.all(
+    hydrated.map(async (entry) => ({
+      ...entry,
+      items: await attachStockEntryLots(entry.items || []),
+    })),
+  );
+
+  return Array.isArray(records) ? withLots : withLots[0];
 };
 
 const normalizeStockEntryItems = (items = [], operationType = "IN") =>
@@ -53,6 +127,9 @@ const normalizeStockEntryItems = (items = [], operationType = "IN") =>
       unitId: item.unitId,
       quantity,
       unitCost: item.unitCost,
+      batchNumber: item.batchNumber ? String(item.batchNumber).trim() : null,
+      expiryDate: item.expiryDate || null,
+      manufacturedAt: item.manufacturedAt || null,
     };
   });
 
@@ -77,6 +154,17 @@ const hasQuantityMismatch = (expectedItems = [], actualItems = []) => {
   }
 
   return false;
+};
+
+const getStockEntryOperationType = (entry) =>
+  Array.isArray(entry?.items) && entry.items.some((item) => Number(item.quantity || 0) < 0) ? "OUT" : "IN";
+
+const getStockEntryApprovalConfig = async (tenantId, sourceType, operationType = "IN") => {
+  const flow = await loadApprovalFlow(tenantId, resolveStockEntryFlowCodes(sourceType, operationType));
+  return {
+    flow,
+    requiresApproval: Boolean(flow?.steps?.length),
+  };
 };
 
 const createStockEntry = async (req, res) => {
@@ -187,7 +275,13 @@ const createStockEntry = async (req, res) => {
     };
   }
 
-  const status = sourceType === "DIRECT" ? "PENDING" : "APPROVED";
+  await ensureInventoryLotTables();
+  const approvalConfig = await getStockEntryApprovalConfig(
+    req.user.tenantId,
+    sourceType,
+    normalizedOperationType,
+  );
+  const status = sourceType === "DIRECT" || approvalConfig.requiresApproval ? "PENDING" : "APPROVED";
 
   const entry = await prisma.stockEntry.create({
     data: {
@@ -219,6 +313,15 @@ const createStockEntry = async (req, res) => {
     (entry.items || []).map((item) => item.id),
     currencySettings.primaryCurrencyCode,
   );
+  await setStockEntryItemLots(prisma, req.user.tenantId, entry.items || [], normalizedItems);
+  if (approvalConfig.requiresApproval) {
+    await prepareDocumentApprovals({
+      tenantId: req.user.tenantId,
+      documentType: STOCK_ENTRY_DOCUMENT_TYPE,
+      documentId: entry.id,
+      flowCodes: resolveStockEntryFlowCodes(sourceType, normalizedOperationType),
+    });
+  }
 
   if (deliveryNotePayload?.supplierId) {
     await prisma.deliveryNote.create({
@@ -246,13 +349,15 @@ const createStockEntry = async (req, res) => {
     });
   }
 
-  return res.status(201).json({
-    ...entry,
-    items: (entry.items || []).map((item) => ({
-      ...item,
-      currencyCode: currencySettings.primaryCurrencyCode,
-    })),
-  });
+  return res.status(201).json(
+    await decorateStockEntriesWithApprovals({
+      ...entry,
+      items: (entry.items || []).map((item) => ({
+        ...item,
+        currencyCode: currencySettings.primaryCurrencyCode,
+      })),
+    }),
+  );
 };
 
 const listStockEntries = async (req, res) => {
@@ -351,7 +456,11 @@ const listStockEntries = async (req, res) => {
       orderBy,
     });
 
-    return res.json(await hydrateStockEntriesWithCurrencyCodes(entries));
+    return res.json(
+      await decorateStockEntriesWithApprovals(
+        await hydrateStockEntriesWithCurrencyCodes(entries),
+      ),
+    );
   }
 
   const [total, entries] = await prisma.$transaction([
@@ -372,7 +481,9 @@ const listStockEntries = async (req, res) => {
   ]);
 
   return res.json({
-    data: await hydrateStockEntriesWithCurrencyCodes(entries),
+    data: await decorateStockEntriesWithApprovals(
+      await hydrateStockEntriesWithCurrencyCodes(entries),
+    ),
     meta: buildMeta({ page, pageSize, total, sortBy, sortDir }),
   });
 };
@@ -395,7 +506,11 @@ const getStockEntry = async (req, res) => {
     return res.status(404).json({ message: "Stock entry not found." });
   }
 
-  return res.json(await hydrateStockEntriesWithCurrencyCodes(entry));
+  return res.json(
+    await decorateStockEntriesWithApprovals(
+      await hydrateStockEntriesWithCurrencyCodes(entry),
+    ),
+  );
 };
 
 const getStockEntryPdf = async (req, res) => {
@@ -455,15 +570,9 @@ const updateStockEntry = async (req, res) => {
     return res.status(404).json({ message: "Stock entry not found." });
   }
 
-  if (entry.status !== "PENDING") {
+  if (!(await canModifyStockEntry(req.user.tenantId, entry))) {
     return res.status(400).json({
       message: "Only pending direct stock entries can be edited.",
-    });
-  }
-
-  if (entry.sourceType !== "DIRECT") {
-    return res.status(400).json({
-      message: "Only direct stock entries can be edited.",
     });
   }
 
@@ -475,6 +584,7 @@ const updateStockEntry = async (req, res) => {
   }
 
   const normalizedItems = normalizeStockEntryItems(items, operationType === "OUT" ? "OUT" : "IN");
+  await ensureInventoryLotTables();
   const currencySettings = await loadTenantCurrencySettings(
     prisma,
     req.user.tenantId,
@@ -515,14 +625,17 @@ const updateStockEntry = async (req, res) => {
     (updated.items || []).map((item) => item.id),
     currencySettings.primaryCurrencyCode,
   );
+  await setStockEntryItemLots(prisma, req.user.tenantId, updated.items || [], normalizedItems);
 
-  return res.json({
-    ...updated,
-    items: (updated.items || []).map((item) => ({
-      ...item,
-      currencyCode: currencySettings.primaryCurrencyCode,
-    })),
-  });
+  return res.json(
+    await decorateStockEntriesWithApprovals({
+      ...updated,
+      items: (updated.items || []).map((item) => ({
+        ...item,
+        currencyCode: currencySettings.primaryCurrencyCode,
+      })),
+    }),
+  );
 };
 
 const deleteStockEntry = async (req, res) => {
@@ -536,7 +649,7 @@ const deleteStockEntry = async (req, res) => {
     return res.status(404).json({ message: "Stock entry not found." });
   }
 
-  if (entry.status !== "PENDING" || entry.sourceType !== "DIRECT") {
+  if (!(await canModifyStockEntry(req.user.tenantId, entry))) {
     return res.status(400).json({
       message: "Only pending direct stock entries can be deleted.",
     });
@@ -548,14 +661,78 @@ const deleteStockEntry = async (req, res) => {
 
 const approveStockEntry = async (req, res) => {
   const { id } = req.params;
+  const note = req.body?.note || null;
 
-  const entry = await prisma.stockEntry.findUnique({ where: { id } });
+  const entry = await prisma.stockEntry.findUnique({
+    where: { id },
+    include: {
+      store: true,
+      storageZone: true,
+      createdBy: true,
+      approvedBy: true,
+      items: { include: { product: true, unit: true } },
+    },
+  });
   if (!entry || entry.tenantId !== req.user.tenantId) {
     return res.status(404).json({ message: "Stock entry not found." });
   }
 
+  const approvalConfig = await getStockEntryApprovalConfig(
+    req.user.tenantId,
+    entry.sourceType,
+    getStockEntryOperationType(entry),
+  );
+
+  if (approvalConfig.requiresApproval) {
+    try {
+      const decision = await decideDocumentApproval({
+        tenantId: req.user.tenantId,
+        documentType: STOCK_ENTRY_DOCUMENT_TYPE,
+        documentId: id,
+        user: req.user,
+        decision: "APPROVED",
+        note,
+      });
+
+      let updated = entry;
+      if (decision.lifecycleStatus === "APPROVED" && entry.status !== "APPROVED") {
+        updated = await prisma.stockEntry.update({
+          where: { id },
+          data: {
+            status: "APPROVED",
+            approvedById: req.user.id,
+            approvedAt: new Date(),
+          },
+          include: {
+            store: true,
+            storageZone: true,
+            createdBy: true,
+            approvedBy: true,
+            items: { include: { product: true, unit: true } },
+          },
+        });
+
+        emitToStore(entry.storeId || req.user.storeId, "stock:entry:approved", {
+          id: updated.id,
+          status: updated.status,
+          storeId: entry.storeId || req.user.storeId,
+        });
+      }
+
+      return res.json(
+        await decorateStockEntriesWithApprovals(
+          await hydrateStockEntriesWithCurrencyCodes(updated),
+        ),
+      );
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        message: error.message || "Impossible de valider cette entree de stock.",
+      });
+    }
+  }
+
   if (entry.sourceType !== "DIRECT") {
-    return res.status(400).json({ message: "Only DIRECT entries require approval." });
+    return res.status(400).json({ message: "This stock entry does not require approval." });
   }
 
   const updated = await prisma.stockEntry.update({
@@ -573,7 +750,76 @@ const approveStockEntry = async (req, res) => {
     storeId: entry.storeId || req.user.storeId,
   });
 
-  return res.json(updated);
+  return res.json(
+    await decorateStockEntriesWithApprovals(
+      await hydrateStockEntriesWithCurrencyCodes(updated),
+    ),
+  );
+};
+
+const rejectStockEntry = async (req, res) => {
+  const { id } = req.params;
+  const note = req.body?.note || null;
+
+  const entry = await prisma.stockEntry.findUnique({
+    where: { id },
+    include: {
+      store: true,
+      storageZone: true,
+      createdBy: true,
+      approvedBy: true,
+      items: { include: { product: true, unit: true } },
+    },
+  });
+  if (!entry || entry.tenantId !== req.user.tenantId) {
+    return res.status(404).json({ message: "Stock entry not found." });
+  }
+
+  const approvalConfig = await getStockEntryApprovalConfig(
+    req.user.tenantId,
+    entry.sourceType,
+    getStockEntryOperationType(entry),
+  );
+  if (!approvalConfig.requiresApproval) {
+    return res.status(400).json({ message: "This stock entry does not use approval workflow." });
+  }
+
+  try {
+    await decideDocumentApproval({
+      tenantId: req.user.tenantId,
+      documentType: STOCK_ENTRY_DOCUMENT_TYPE,
+      documentId: id,
+      user: req.user,
+      decision: "REJECTED",
+      note,
+    });
+
+    const updated = await prisma.stockEntry.update({
+      where: { id },
+      data: {
+        status: "PENDING",
+        approvedById: null,
+        approvedAt: null,
+      },
+      include: {
+        store: true,
+        storageZone: true,
+        createdBy: true,
+        approvedBy: true,
+        items: { include: { product: true, unit: true } },
+      },
+    });
+
+    return res.json(
+      await decorateStockEntriesWithApprovals(
+        await hydrateStockEntriesWithCurrencyCodes(updated),
+      ),
+    );
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      message: error.message || "Impossible de rejeter cette entree de stock.",
+    });
+  }
 };
 
 const postStockEntry = async (req, res) => {
@@ -592,8 +838,8 @@ const postStockEntry = async (req, res) => {
     return res.status(400).json({ message: "Stock entry already posted." });
   }
 
-  if (entry.sourceType === "DIRECT" && entry.status !== "APPROVED") {
-    return res.status(403).json({ message: "Direct entry must be approved first." });
+  if (entry.status !== "APPROVED") {
+    return res.status(403).json({ message: "Stock entry must be approved first." });
   }
 
   const storageZone = await prisma.storageZone.findUnique({
@@ -611,6 +857,7 @@ const postStockEntry = async (req, res) => {
     const quantity = toNumber(item.quantity);
     const movementType = quantity >= 0 ? "IN" : "OUT";
     const absoluteQuantity = Math.abs(quantity);
+    const [lotMeta] = await attachStockEntryLots([item]);
 
     const existingInventory = await prisma.inventory.findUnique({
       where: {
@@ -627,24 +874,27 @@ const postStockEntry = async (req, res) => {
       });
     }
 
-    await prisma.inventory.upsert({
-      where: {
-        storageZoneId_productId: {
-          storageZoneId: entry.storageZoneId,
-          productId: item.productId,
-        },
-      },
-      create: {
+    if (quantity >= 0) {
+      await incrementInventoryLot(prisma, {
         tenantId: entry.tenantId,
         storeId: storageZone.storeId,
         storageZoneId: entry.storageZoneId,
         productId: item.productId,
-        quantity,
-      },
-      update: {
-        quantity: { increment: quantity },
-      },
-    });
+        quantity: absoluteQuantity,
+        batchNumber: lotMeta?.batchNumber || null,
+        expiryDate: lotMeta?.expiryDate || null,
+        manufacturedAt: lotMeta?.manufacturedAt || null,
+        unitCost: item.unitCost,
+      });
+    } else {
+      await consumeInventoryLotsFefo(prisma, {
+        tenantId: entry.tenantId,
+        storeId: storageZone.storeId,
+        storageZoneId: entry.storageZoneId,
+        productId: item.productId,
+        quantity: absoluteQuantity,
+      });
+    }
 
     await prisma.inventoryMovement.create({
       data: {
@@ -673,6 +923,8 @@ const postStockEntry = async (req, res) => {
     });
   }
 
+  await emitLotExpiryNotifications(entry.tenantId);
+
   return res.json(updated);
 };
 
@@ -684,5 +936,6 @@ module.exports = {
   updateStockEntry,
   deleteStockEntry,
   approveStockEntry,
+  rejectStockEntry,
   postStockEntry,
 };

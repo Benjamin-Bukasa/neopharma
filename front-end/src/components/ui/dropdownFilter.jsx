@@ -6,47 +6,82 @@ const defaultStocks = [
   { id: "all", label: "Tous" },
   { id: "en stock", label: "En stock" },
   { id: "faible", label: "Faible" },
-  { id: "épuisé", label: "Épuisé" },
+  { id: "epuise", label: "Epuise" },
 ];
-const defaultCategories = [
-  { id: "all", label: "Toutes" },
-  { id: "antalgique", label: "Antalgique" },
-  { id: "antibiotique", label: "Antibiotique" },
-  { id: "anti-inflammatoire", label: "Anti-inflammatoire" },
-  { id: "antihistaminique", label: "Antihistaminique" },
-  { id: "gastro-entérologie", label: "Gastro-entérologie" },
-  { id: "respiratoire", label: "Respiratoire" },
-  { id: "diabète", label: "Diabète" },
-  { id: "cardiologie", label: "Cardiologie" },
-  { id: "psychiatrie", label: "Psychiatrie" },
-  { id: "endocrinologie", label: "Endocrinologie" },
-  { id: "corticoïde", label: "Corticoïde" },
-];
+
+const defaultCategories = [{ id: "all", label: "Toutes" }];
+
 const defaultStatuses = [
   { id: "all", label: "Tous" },
   { id: "actif", label: "Actif" },
   { id: "inactif", label: "Inactif" },
-  { id: "annule", label: "Annulé" },
+  { id: "annule", label: "Annule" },
 ];
+
+const renderSelectBlock = ({
+  title,
+  value,
+  options,
+  onChange,
+  onReset,
+}) => (
+  <div className="space-y-2">
+    <div className="flex items-center justify-between">
+      <p className="text-xs font-semibold uppercase text-text-secondary">{title}</p>
+      <button
+        type="button"
+        className="text-xs text-secondary hover:underline dark:text-accent"
+        onClick={onReset}
+      >
+        Reinitialiser
+      </button>
+    </div>
+    <select
+      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+      value={value}
+      onChange={onChange}
+    >
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
+);
 
 const DropdownFilter = ({
   label = "Filtrer",
   items,
   statusItems,
   categoryItems,
+  familyItems,
+  subFamilyItems,
+  collectionItems,
   initialValues,
   onApply,
   onReset,
   buttonClassName = "",
   showDateRange = true,
   showCategory = false,
+  showFamily = false,
+  showSubFamily = false,
+  showCollection = false,
   ...props
 }) => {
   const resolvedStocks = items?.length ? items : defaultStocks;
   const resolvedStatuses = statusItems?.length ? statusItems : defaultStatuses;
-  const resolvedCategories = categoryItems?.length
-    ? categoryItems
-    : defaultCategories;
+  const resolvedCategories = categoryItems?.length ? categoryItems : defaultCategories;
+  const resolvedFamilies = familyItems?.length
+    ? familyItems
+    : [{ id: "all", label: "Toutes" }];
+  const resolvedSubFamilies = subFamilyItems?.length
+    ? subFamilyItems
+    : [{ id: "all", label: "Toutes" }];
+  const resolvedCollections = collectionItems?.length
+    ? collectionItems
+    : [{ id: "all", label: "Toutes" }];
+
   const defaults = useMemo(
     () => ({
       from: "",
@@ -54,11 +89,23 @@ const DropdownFilter = ({
       stock: resolvedStocks[0]?.id ?? "",
       status: resolvedStatuses[0]?.id ?? "",
       category: resolvedCategories[0]?.id ?? "",
+      family: resolvedFamilies[0]?.id ?? "",
+      subFamily: resolvedSubFamilies[0]?.id ?? "",
+      collection: resolvedCollections[0]?.id ?? "",
       keyword: "",
       ...initialValues,
     }),
-    [initialValues, resolvedStocks, resolvedStatuses, resolvedCategories]
+    [
+      initialValues,
+      resolvedStocks,
+      resolvedStatuses,
+      resolvedCategories,
+      resolvedFamilies,
+      resolvedSubFamilies,
+      resolvedCollections,
+    ],
   );
+
   const [values, setValues] = useState(defaults);
 
   const handleResetAll = () => {
@@ -76,9 +123,9 @@ const DropdownFilter = ({
         </div>
       }
       buttonClassName={[
-        "px-4 py-2 rounded-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
-        "bg-neutral-300 text-text-primary focus:ring-neutral-400",
-        "dark:bg-surface dark:text-text-primary dark:border dark:border-border dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50 dark:focus:border-neutral-600/60",
+        "rounded-lg px-4 py-2 font-medium focus:outline-none focus:ring-2 focus:ring-offset-2",
+        "bg-transparent text-text-primary hover:bg-surface/70 focus:ring-secondary/40",
+        "dark:bg-transparent dark:text-text-primary dark:hover:bg-surface/70 dark:focus:ring-neutral-600/50",
         buttonClassName,
       ].join(" ")}
       menuClassName="w-[320px] shadow-xl"
@@ -112,11 +159,9 @@ const DropdownFilter = ({
                   <button
                     type="button"
                     className="text-xs text-secondary hover:underline dark:text-accent"
-                    onClick={() =>
-                      setValues((prev) => ({ ...prev, from: "", to: "" }))
-                    }
+                    onClick={() => setValues((prev) => ({ ...prev, from: "", to: "" }))}
                   >
-                    Réinitialiser
+                    Reinitialiser
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -146,109 +191,88 @@ const DropdownFilter = ({
               </div>
             ) : null}
 
-            {showCategory ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase text-text-secondary">
-                    Catégorie
-                  </p>
-                  <button
-                    type="button"
-                    className="text-xs text-secondary hover:underline dark:text-accent"
-                    onClick={() =>
-                      setValues((prev) => ({
-                        ...prev,
-                        category: resolvedCategories[0]?.id ?? "",
-                      }))
-                    }
-                  >
-                    Réinitialiser
-                  </button>
-                </div>
-                <select
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-                  value={values.category}
-                  onChange={(event) =>
+            {showCollection
+              ? renderSelectBlock({
+                  title: "Collection",
+                  value: values.collection,
+                  options: resolvedCollections,
+                  onChange: (event) =>
+                    setValues((prev) => ({ ...prev, collection: event.target.value })),
+                  onReset: () =>
                     setValues((prev) => ({
                       ...prev,
-                      category: event.target.value,
-                    }))
-                  }
-                >
-                  {resolvedCategories.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
+                      collection: resolvedCollections[0]?.id ?? "",
+                    })),
+                })
+              : null}
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase text-text-secondary">
-                  Stock
-                </p>
-                <button
-                  type="button"
-                  className="text-xs text-secondary hover:underline dark:text-accent"
-              onClick={() =>
-                setValues((prev) => ({
-                  ...prev,
-                  stock: resolvedStocks[0]?.id ?? "",
-                }))
-              }
-              >
-                Réinitialiser
-              </button>
-            </div>
-              <select
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-                value={values.stock}
-                onChange={(event) =>
-                  setValues((prev) => ({ ...prev, stock: event.target.value }))
-                }
-              >
-                {resolvedStocks.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {showCategory
+              ? renderSelectBlock({
+                  title: "Categorie",
+                  value: values.category,
+                  options: resolvedCategories,
+                  onChange: (event) =>
+                    setValues((prev) => ({ ...prev, category: event.target.value })),
+                  onReset: () =>
+                    setValues((prev) => ({
+                      ...prev,
+                      category: resolvedCategories[0]?.id ?? "",
+                    })),
+                })
+              : null}
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase text-text-secondary">
-                  Statut
-                </p>
-                <button
-                  type="button"
-                  className="text-xs text-secondary hover:underline dark:text-accent"
-              onClick={() =>
+            {showFamily
+              ? renderSelectBlock({
+                  title: "Famille",
+                  value: values.family,
+                  options: resolvedFamilies,
+                  onChange: (event) =>
+                    setValues((prev) => ({ ...prev, family: event.target.value })),
+                  onReset: () =>
+                    setValues((prev) => ({
+                      ...prev,
+                      family: resolvedFamilies[0]?.id ?? "",
+                    })),
+                })
+              : null}
+
+            {showSubFamily
+              ? renderSelectBlock({
+                  title: "Sous-famille",
+                  value: values.subFamily,
+                  options: resolvedSubFamilies,
+                  onChange: (event) =>
+                    setValues((prev) => ({ ...prev, subFamily: event.target.value })),
+                  onReset: () =>
+                    setValues((prev) => ({
+                      ...prev,
+                      subFamily: resolvedSubFamilies[0]?.id ?? "",
+                    })),
+                })
+              : null}
+
+            {renderSelectBlock({
+              title: "Stock",
+              value: values.stock,
+              options: resolvedStocks,
+              onChange: (event) =>
+                setValues((prev) => ({ ...prev, stock: event.target.value })),
+              onReset: () =>
+                setValues((prev) => ({ ...prev, stock: resolvedStocks[0]?.id ?? "" })),
+            })}
+
+            {renderSelectBlock({
+              title: "Statut",
+              value: values.status,
+              options: resolvedStatuses,
+              onChange: (event) =>
+                setValues((prev) => ({ ...prev, status: event.target.value })),
+              onReset: () =>
                 setValues((prev) => ({
                   ...prev,
                   status: resolvedStatuses[0]?.id ?? "",
-                }))
-              }
-              >
-                Réinitialiser
-              </button>
-            </div>
-              <select
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-                value={values.status}
-                onChange={(event) =>
-                  setValues((prev) => ({ ...prev, status: event.target.value }))
-                }
-              >
-                {resolvedStatuses.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                })),
+            })}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -260,7 +284,7 @@ const DropdownFilter = ({
                   className="text-xs text-secondary hover:underline dark:text-accent"
                   onClick={() => setValues((prev) => ({ ...prev, keyword: "" }))}
                 >
-                  Réinitialiser
+                  Reinitialiser
                 </button>
               </div>
               <div className="relative">
@@ -276,11 +300,8 @@ const DropdownFilter = ({
                     setValues((prev) => ({ ...prev, keyword: event.target.value }))
                   }
                   placeholder="Rechercher..."
-                  className="w-full rounded-lg border border-border bg-surface py-2 pl-9 pr-12 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full rounded-lg border border-border bg-surface py-2 pl-9 pr-4 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-border bg-surface/80 px-2 py-0.5 text-[10px] text-text-secondary">
-                  ⌘ K
-                </span>
               </div>
             </div>
           </div>
@@ -289,9 +310,9 @@ const DropdownFilter = ({
             <button
               type="button"
               onClick={handleResetAll}
-              className="rounded-lg bg-neutral-200 px-3 py-2 text-sm font-medium text-text-primary hover:bg-neutral-300 dark:bg-surface dark:border dark:border-border dark:hover:bg-surface/70"
+              className="rounded-lg bg-background px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70"
             >
-              Réinitialiser
+              Reinitialiser
             </button>
             <button
               type="button"

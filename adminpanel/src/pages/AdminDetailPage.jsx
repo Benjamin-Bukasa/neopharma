@@ -31,6 +31,15 @@ const formatDate = (value) => {
   }).format(date);
 };
 
+const formatDateOnly = (value) => {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "medium",
+  }).format(date);
+};
+
 const toNumber = (value) => {
   const amount = Number(value || 0);
   return Number.isFinite(amount) ? amount : 0;
@@ -45,6 +54,7 @@ const statusLabels = {
   DRAFT: "Non valide",
   SUBMITTED: "En cours",
   APPROVED: "Valide",
+  CLOSED: "Cloture",
   SENT: "Valide",
   ORDERED: "Commande creee",
   PENDING: "En attente",
@@ -118,7 +128,7 @@ const DetailList = ({ items = [] }) => (
 const DataTable = ({ columns = [], rows = [], emptyMessage = "Aucune donnee." }) => (
   <div className="overflow-auto rounded-xl border border-border">
     <table className="min-w-[640px] w-full border-collapse text-sm xl:min-w-full">
-      <thead className="bg-[#b0bbb7] dark:bg-[#1D473F]">
+      <thead className="bg-header dark:bg-secondary">
         <tr>
           {columns.map((column) => (
             <th
@@ -248,6 +258,16 @@ const stockEntryItemsColumns = [
     render: (row) => toNumber(row.quantity),
   },
   {
+    key: "batchNumber",
+    label: "Lot",
+    render: (row) => row.batchNumber || "Sans lot",
+  },
+  {
+    key: "expiryDate",
+    label: "Expiration",
+    render: (row) => formatDateOnly(row.expiryDate),
+  },
+  {
     key: "unitCost",
     label: "Cout unitaire",
     render: (row) => formatMoney(row.unitCost, row.currencyCode),
@@ -295,6 +315,10 @@ const referencePrefixByKind = {
   "approval-request": "DOC",
   "purchase-order": "PO",
   "stock-entry": "SE",
+  transfer: "TRF",
+  "supplier-return": "SRF",
+  "cash-session": "CSH",
+  "inventory-session": "INV",
 };
 
 const AdminDetailPage = () => {
@@ -326,6 +350,10 @@ const AdminDetailPage = () => {
   const isApprovalRequest = detailKind === "approval-request";
   const isPurchaseOrder = detailKind === "purchase-order";
   const isStockEntry = detailKind === "stock-entry";
+  const isTransfer = detailKind === "transfer";
+  const isSupplierReturn = detailKind === "supplier-return";
+  const isCashSession = detailKind === "cash-session";
+  const isInventorySession = detailKind === "inventory-session";
   const approvalBase = approvalBaseByResource[detailConfig?.resourcePath] || null;
   const isAdminUser = ["SUPERADMIN", "ADMIN"].includes(currentUser?.role);
   const isSuperAdmin = currentUser?.role === "SUPERADMIN";
@@ -412,14 +440,155 @@ const AdminDetailPage = () => {
       detailConfig?.editPermissions ||
         getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
     );
-  const canSendPurchaseOrder = isPurchaseOrder && record?.status === "DRAFT" && isAdminUser;
+  const currentPurchaseOrderApproval = useMemo(() => {
+    if (!isPurchaseOrder) return null;
+    return (
+      (record?.approvals || [])
+        .filter((approval) => approval.status === "PENDING")
+        .sort((left, right) => (left.stepOrder || 0) - (right.stepOrder || 0))[0] ||
+      null
+    );
+  }, [isPurchaseOrder, record?.approvals]);
+  const canDecidePurchaseOrderApproval = useMemo(() => {
+    if (!isPurchaseOrder || !currentPurchaseOrderApproval || !currentUser) return false;
+    return (
+      (currentPurchaseOrderApproval.approverId &&
+        currentPurchaseOrderApproval.approverId === currentUser.id) ||
+      (currentPurchaseOrderApproval.approverRole &&
+        currentPurchaseOrderApproval.approverRole === currentUser.role)
+    );
+  }, [currentPurchaseOrderApproval, currentUser, isPurchaseOrder]);
+  const canSendPurchaseOrder =
+    isPurchaseOrder &&
+    ["DRAFT", "REJECTED"].includes(record?.status) &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
+  const currentStockEntryApproval = useMemo(() => {
+    if (!isStockEntry) return null;
+    return (
+      (record?.approvals || [])
+        .filter((approval) => approval.status === "PENDING")
+        .sort((left, right) => (left.stepOrder || 0) - (right.stepOrder || 0))[0] ||
+      null
+    );
+  }, [isStockEntry, record?.approvals]);
+  const canDecideStockEntryApproval = useMemo(() => {
+    if (!isStockEntry || !currentStockEntryApproval || !currentUser) return false;
+    return (
+      (currentStockEntryApproval.approverId &&
+        currentStockEntryApproval.approverId === currentUser.id) ||
+      (currentStockEntryApproval.approverRole &&
+        currentStockEntryApproval.approverRole === currentUser.role)
+    );
+  }, [currentStockEntryApproval, currentUser, isStockEntry]);
   const canApproveStockEntry =
     isStockEntry &&
-    record?.sourceType === "DIRECT" &&
-    record?.status === "PENDING" &&
-    isSuperAdmin;
+    ((record?.approvals?.length
+      ? canDecideStockEntryApproval
+      : record?.sourceType === "DIRECT" && record?.status === "PENDING" && isSuperAdmin));
+  const canRejectStockEntry =
+    isStockEntry && Boolean(record?.approvals?.length) && canDecideStockEntryApproval;
   const canPostStockEntry =
     isStockEntry && record?.status === "APPROVED" && isAdminUser;
+  const currentTransferApproval = useMemo(() => {
+    if (!isTransfer) return null;
+    return (
+      (record?.approvals || [])
+        .filter((approval) => approval.status === "PENDING")
+        .sort((left, right) => (left.stepOrder || 0) - (right.stepOrder || 0))[0] ||
+      null
+    );
+  }, [isTransfer, record?.approvals]);
+  const canDecideTransferApproval = useMemo(() => {
+    if (!isTransfer || !currentTransferApproval || !currentUser) return false;
+    return (
+      (currentTransferApproval.approverId &&
+        currentTransferApproval.approverId === currentUser.id) ||
+      (currentTransferApproval.approverRole &&
+        currentTransferApproval.approverRole === currentUser.role)
+    );
+  }, [currentTransferApproval, currentUser, isTransfer]);
+  const canSubmitTransfer =
+    isTransfer &&
+    ["DRAFT", "REJECTED"].includes(record?.status) &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
+  const currentSupplierReturnApproval = useMemo(() => {
+    if (!isSupplierReturn) return null;
+    return (
+      (record?.approvals || [])
+        .filter((approval) => approval.status === "PENDING")
+        .sort((left, right) => (left.stepOrder || 0) - (right.stepOrder || 0))[0] ||
+      null
+    );
+  }, [isSupplierReturn, record?.approvals]);
+  const canDecideSupplierReturnApproval = useMemo(() => {
+    if (!isSupplierReturn || !currentSupplierReturnApproval || !currentUser) return false;
+    return (
+      (currentSupplierReturnApproval.approverId &&
+        currentSupplierReturnApproval.approverId === currentUser.id) ||
+      (currentSupplierReturnApproval.approverRole &&
+        currentSupplierReturnApproval.approverRole === currentUser.role)
+    );
+  }, [currentSupplierReturnApproval, currentUser, isSupplierReturn]);
+  const canSubmitSupplierReturn =
+    isSupplierReturn &&
+    ["DRAFT", "REJECTED"].includes(record?.status) &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
+  const canPostSupplierReturn =
+    isSupplierReturn &&
+    record?.status === "APPROVED" &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
+  const currentInventoryApproval = useMemo(() => {
+    if (!isInventorySession) return null;
+
+    return (
+      (record?.approvals || [])
+        .filter((approval) => approval.status === "PENDING")
+        .sort((left, right) => (left.stepOrder || 0) - (right.stepOrder || 0))[0] ||
+      null
+    );
+  }, [isInventorySession, record?.approvals]);
+  const canDecideInventoryApproval = useMemo(() => {
+    if (!isInventorySession || !currentInventoryApproval || !currentUser) return false;
+
+    return (
+      (currentInventoryApproval.approverId &&
+        currentInventoryApproval.approverId === currentUser.id) ||
+      (currentInventoryApproval.approverRole &&
+        currentInventoryApproval.approverRole === currentUser.role)
+    );
+  }, [currentInventoryApproval, currentUser, isInventorySession]);
+  const canSubmitInventorySession =
+    isInventorySession &&
+    ["DRAFT", "REJECTED"].includes(record?.status) &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
+  const canCloseInventorySession =
+    isInventorySession &&
+    record?.status === "APPROVED" &&
+    hasAnyPermission(
+      currentUser,
+      detailConfig?.editPermissions ||
+        getRouteActionPermissions(detailConfig?.resourcePath || currentRoute.path, "edit"),
+    );
 
   const runAction = async ({ key, endpoint, body, successMessage }) => {
     if (!recordId || !accessToken) {
@@ -576,6 +745,191 @@ const AdminDetailPage = () => {
       { label: "Note", value: record.note || "--" },
     ];
   }, [isStockEntry, record, referencePrefix]);
+
+  const transferInfoItems = useMemo(() => {
+    if (!isTransfer || !record) return [];
+
+    return [
+      {
+        label: "Reference",
+        value: record.code || `${referencePrefix}-${record.id.slice(0, 8).toUpperCase()}`,
+      },
+      { label: "Statut", value: record.status, render: renderPill },
+      { label: "Boutique source", value: record.fromStore?.name || "--" },
+      { label: "Zone source", value: record.fromZone?.name || "--" },
+      { label: "Boutique cible", value: record.toStore?.name || "--" },
+      { label: "Zone cible", value: record.toZone?.name || "--" },
+      { label: "Demandeur", value: formatPerson(record.requestedBy) },
+      { label: "Date creation", value: formatDate(record.createdAt) },
+      { label: "Note", value: record.note || "--" },
+    ];
+  }, [isTransfer, record, referencePrefix]);
+
+  const supplierReturnInfoItems = useMemo(() => {
+    if (!isSupplierReturn || !record) return [];
+    return [
+      {
+        label: "Reference",
+        value: record.code || `${referencePrefix}-${record.id.slice(0, 8).toUpperCase()}`,
+      },
+      { label: "Statut", value: record.status, render: renderPill },
+      { label: "Fournisseur", value: record.supplier?.name || "--" },
+      { label: "Boutique", value: record.store?.name || "--" },
+      { label: "Zone", value: record.storageZone?.name || "--" },
+      { label: "Demandeur", value: formatPerson(record.requestedBy) },
+      { label: "Valide par", value: formatPerson(record.approvedBy) },
+      { label: "Date creation", value: formatDate(record.createdAt) },
+      { label: "Date validation", value: formatDate(record.approvedAt) },
+      { label: "Date comptabilisation", value: formatDate(record.postedAt) },
+      { label: "Note", value: record.note || "--" },
+    ];
+  }, [isSupplierReturn, record, referencePrefix]);
+
+  const cashSessionInfoItems = useMemo(() => {
+    if (!isCashSession || !record) return [];
+
+    return [
+      {
+        label: "Reference",
+        value: `${referencePrefix}-${record.id.slice(0, 8).toUpperCase()}`,
+      },
+      { label: "Statut", value: record.status, render: renderPill },
+      { label: "Boutique", value: record.storeName || "--" },
+      { label: "Caissier", value: record.userName || "--" },
+      { label: "Zone", value: record.storageZoneName || "--" },
+      { label: "Fonds initial", value: formatMoney(record.openingFloat, record.currencyCode) },
+      { label: "Ventes cash", value: formatMoney(record.totalCashSales, record.currencyCode) },
+      {
+        label: "Ventes non cash",
+        value: formatMoney(record.totalNonCashSales, record.currencyCode),
+      },
+      { label: "Entrees cash", value: formatMoney(record.totalCashIn, record.currencyCode) },
+      { label: "Sorties cash", value: formatMoney(record.totalCashOut, record.currencyCode) },
+      { label: "Cash theorique", value: formatMoney(record.expectedCash, record.currencyCode) },
+      {
+        label: "Cash compte",
+        value:
+          record.closingCounted == null
+            ? "--"
+            : formatMoney(record.closingCounted, record.currencyCode),
+      },
+      {
+        label: "Ecart",
+        value:
+          record.variance == null ? "--" : formatMoney(record.variance, record.currencyCode),
+      },
+      { label: "Ouverte le", value: formatDate(record.openedAt) },
+      { label: "Cloturee le", value: formatDate(record.closedAt) },
+      { label: "Note ouverture", value: record.openingNote || "--" },
+      { label: "Note cloture", value: record.closingNote || "--" },
+    ];
+  }, [isCashSession, record, referencePrefix]);
+
+  const inventorySessionInfoItems = useMemo(() => {
+    if (!isInventorySession || !record) return [];
+
+    return [
+      {
+        label: "Reference",
+        value: record.code || `${referencePrefix}-${record.id.slice(0, 8).toUpperCase()}`,
+      },
+      { label: "Statut", value: record.status, render: renderPill },
+      { label: "Boutique", value: record.store?.name || "--" },
+      { label: "Zone", value: record.storageZone?.name || "--" },
+      { label: "Demandeur", value: formatPerson(record.requestedBy) },
+      { label: "Lignes", value: record.itemsCount ?? 0 },
+      { label: "Ecarts", value: record.discrepancyCount ?? 0 },
+      { label: "Niveaux", value: record.approvalsCount ?? 0 },
+      { label: "Cree le", value: formatDate(record.createdAt) },
+      { label: "Cloture le", value: formatDate(record.closedAt) },
+      { label: "Cloture par", value: formatPerson(record.closedBy) },
+      { label: "Note", value: record.note || "--" },
+    ];
+  }, [isInventorySession, record, referencePrefix]);
+
+const cashSessionMovementColumns = useMemo(
+    () => [
+      {
+        key: "type",
+        label: "Type",
+        render: (row) => renderPill(row.type),
+      },
+      {
+        key: "amount",
+        label: "Montant",
+        render: (row) => formatMoney(row.amount, row.currencyCode || record?.currencyCode),
+      },
+      {
+        key: "reason",
+        label: "Motif",
+        render: (row) => row.reason || "--",
+      },
+      {
+        key: "note",
+        label: "Note",
+        render: (row) => row.note || "--",
+      },
+      {
+        key: "createdByName",
+        label: "Cree par",
+        render: (row) => row.createdByName || "--",
+      },
+      {
+        key: "createdAt",
+        label: "Date",
+        render: (row) => formatDate(row.createdAt),
+      },
+    ],
+    [record?.currencyCode],
+  );
+
+  const inventorySessionItemsColumns = useMemo(
+    () => [
+      {
+        key: "product",
+        label: "Produit",
+        render: (row) => row.product?.name || "--",
+      },
+      {
+        key: "productSku",
+        label: "Code",
+        render: (row) => row.product?.sku || "--",
+      },
+      {
+        key: "systemQuantity",
+        label: "Qte systeme",
+        render: (row) => toNumber(row.systemQuantity),
+      },
+      {
+        key: "batchNumber",
+        label: "Lot",
+        render: (row) => row.batchNumber || "Sans lot",
+      },
+      {
+        key: "expiryDate",
+        label: "Expiration",
+        render: (row) => formatDateOnly(row.expiryDate),
+      },
+      {
+        key: "physicalQuantity",
+        label: "Qte physique",
+        render: (row) =>
+          row.physicalQuantity == null ? "--" : toNumber(row.physicalQuantity),
+      },
+      {
+        key: "varianceQuantity",
+        label: "Ecart",
+        render: (row) =>
+          row.varianceQuantity == null ? "--" : toNumber(row.varianceQuantity),
+      },
+      {
+        key: "note",
+        label: "Note",
+        render: (row) => row.note || "--",
+      },
+    ],
+    [],
+  );
 
   if (loading) {
     return (
@@ -742,33 +1096,100 @@ const AdminDetailPage = () => {
                   <DetailList items={purchaseOrderInfoItems} />
                 </DetailSection>
 
-                <DetailSection title="Actions metier">
-                  {canSendPurchaseOrder ? (
-                    <div className="space-y-3">
+                <DetailSection title="Workflow">
+                  <div className="space-y-3">
+                    {currentPurchaseOrderApproval ? (
+                      <div className="rounded-xl border border-border bg-background/40 p-4">
+                        <p className="text-sm text-text-secondary">Etape courante</p>
+                        <p className="mt-1 text-sm font-medium text-text-primary">
+                          Niveau {currentPurchaseOrderApproval.stepOrder} -{" "}
+                          {currentPurchaseOrderApproval.approverRole || "Affectation utilisateur"}
+                        </p>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          Statut:{" "}
+                          {statusLabels[currentPurchaseOrderApproval.status] ||
+                            currentPurchaseOrderApproval.status}
+                        </p>
+                      </div>
+                    ) : (
                       <p className="text-sm text-text-secondary">
-                        Cette commande est encore en brouillon. Vous pouvez la valider pour autoriser la reception en stock.
+                        Aucun niveau en attente.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          runAction({
-                            key: "send",
-                            endpoint: `/api/purchase-orders/${recordId}/send`,
-                            successMessage: "Commande validee.",
-                          })
-                        }
-                        disabled={Boolean(pendingAction)}
-                        className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Send size={16} />
-                        Valider la commande
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-text-secondary">
-                      Aucune action disponible pour cette commande dans son etat actuel.
-                    </p>
-                  )}
+                    )}
+
+                    {canSendPurchaseOrder || canDecidePurchaseOrderApproval ? (
+                      <div className="space-y-3">
+                        <textarea
+                          rows={4}
+                          value={decisionNote}
+                          onChange={(event) => setDecisionNote(event.target.value)}
+                          placeholder="Note de workflow"
+                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text-primary outline-none transition focus:border-secondary"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canSendPurchaseOrder ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "send",
+                                  endpoint: `/api/purchase-orders/${recordId}/send`,
+                                  successMessage: "Commande soumise au workflow.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Send size={16} />
+                              Soumettre
+                            </button>
+                          ) : null}
+
+                          {canDecidePurchaseOrderApproval ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "approve-purchase-order",
+                                    endpoint: `/api/purchase-orders/${recordId}/approve`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Commande validee.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <CheckCircle2 size={16} />
+                                Valider
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "reject-purchase-order",
+                                    endpoint: `/api/purchase-orders/${recordId}/reject`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Commande rejetee.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <XCircle size={16} />
+                                Rejeter
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucune action disponible pour cette commande dans son etat actuel.
+                      </p>
+                    )}
+                  </div>
                 </DetailSection>
               </section>
 
@@ -787,6 +1208,14 @@ const AdminDetailPage = () => {
                   emptyMessage="Aucun bon de reception lie a cette commande."
                 />
               </DetailSection>
+
+              <DetailSection title="Historique de validation">
+                <DataTable
+                  columns={approvalColumns}
+                  rows={record.approvals || []}
+                  emptyMessage="Aucun niveau de validation configure."
+                />
+              </DetailSection>
             </>
           ) : null}
 
@@ -799,6 +1228,31 @@ const AdminDetailPage = () => {
 
                 <DetailSection title="Actions metier">
                   <div className="space-y-3">
+                    {currentStockEntryApproval ? (
+                      <div className="rounded-xl border border-border bg-background/40 p-4">
+                        <p className="text-sm text-text-secondary">Etape courante</p>
+                        <p className="mt-1 text-sm font-medium text-text-primary">
+                          Niveau {currentStockEntryApproval.stepOrder} -{" "}
+                          {currentStockEntryApproval.approverRole || "Affectation utilisateur"}
+                        </p>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          Statut:{" "}
+                          {statusLabels[currentStockEntryApproval.status] ||
+                            currentStockEntryApproval.status}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {canRejectStockEntry ? (
+                      <textarea
+                        rows={4}
+                        value={decisionNote}
+                        onChange={(event) => setDecisionNote(event.target.value)}
+                        placeholder="Note de workflow"
+                        className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text-primary outline-none transition focus:border-secondary"
+                      />
+                    ) : null}
+
                     {canApproveStockEntry ? (
                       <button
                         type="button"
@@ -806,6 +1260,7 @@ const AdminDetailPage = () => {
                           runAction({
                             key: "approve-stock-entry",
                             endpoint: `/api/stock-entries/${recordId}/approve`,
+                            body: decisionNote ? { note: decisionNote } : undefined,
                             successMessage: "Entree de stock validee.",
                           })
                         }
@@ -814,6 +1269,25 @@ const AdminDetailPage = () => {
                       >
                         <CheckCircle2 size={16} />
                         Valider
+                      </button>
+                    ) : null}
+
+                    {canRejectStockEntry ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          runAction({
+                            key: "reject-stock-entry",
+                            endpoint: `/api/stock-entries/${recordId}/reject`,
+                            body: decisionNote ? { note: decisionNote } : undefined,
+                            successMessage: "Entree de stock rejetee.",
+                          })
+                        }
+                        disabled={Boolean(pendingAction)}
+                        className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <XCircle size={16} />
+                        Rejeter
                       </button>
                     ) : null}
 
@@ -849,6 +1323,433 @@ const AdminDetailPage = () => {
                   columns={stockEntryItemsColumns}
                   rows={record.items || []}
                   emptyMessage="Aucune ligne d'entree stock."
+                />
+              </DetailSection>
+
+              <DetailSection title="Historique de validation">
+                <DataTable
+                  columns={approvalColumns}
+                  rows={record.approvals || []}
+                  emptyMessage="Aucun niveau de validation configure."
+                />
+              </DetailSection>
+            </>
+          ) : null}
+
+          {isTransfer ? (
+            <>
+              <section className="grid gap-4 lg:grid-cols-2">
+                <DetailSection title="Informations generales">
+                  <DetailList items={transferInfoItems} />
+                </DetailSection>
+
+                <DetailSection title="Workflow">
+                  <div className="space-y-3">
+                    {currentTransferApproval ? (
+                      <div className="rounded-xl border border-border bg-background/40 p-4">
+                        <p className="text-sm text-text-secondary">Etape courante</p>
+                        <p className="mt-1 text-sm font-medium text-text-primary">
+                          Niveau {currentTransferApproval.stepOrder} -{" "}
+                          {currentTransferApproval.approverRole || "Affectation utilisateur"}
+                        </p>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          Statut:{" "}
+                          {statusLabels[currentTransferApproval.status] ||
+                            currentTransferApproval.status}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucun niveau en attente.
+                      </p>
+                    )}
+
+                    {canSubmitTransfer || canDecideTransferApproval ? (
+                      <div className="space-y-3">
+                        <textarea
+                          rows={4}
+                          value={decisionNote}
+                          onChange={(event) => setDecisionNote(event.target.value)}
+                          placeholder="Note de workflow"
+                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text-primary outline-none transition focus:border-secondary"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canSubmitTransfer ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "submit-transfer",
+                                  endpoint: `/api/transfers/${recordId}/complete`,
+                                  successMessage: "Transfert soumis au workflow.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Send size={16} />
+                              Soumettre
+                            </button>
+                          ) : null}
+
+                          {canDecideTransferApproval ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "approve-transfer",
+                                    endpoint: `/api/transfers/${recordId}/approve`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Transfert valide.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <CheckCircle2 size={16} />
+                                Valider
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "reject-transfer",
+                                    endpoint: `/api/transfers/${recordId}/reject`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Transfert rejete.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <XCircle size={16} />
+                                Rejeter
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucune action disponible pour ce transfert dans son etat actuel.
+                      </p>
+                    )}
+                  </div>
+                </DetailSection>
+              </section>
+
+              <DetailSection title="Lignes de transfert">
+                <DataTable
+                  columns={approvalItemsColumns}
+                  rows={record.items || []}
+                  emptyMessage="Aucune ligne de transfert."
+                />
+              </DetailSection>
+
+              <DetailSection title="Historique de validation">
+                <DataTable
+                  columns={approvalColumns}
+                  rows={record.approvals || []}
+                  emptyMessage="Aucun niveau de validation configure."
+                />
+              </DetailSection>
+            </>
+          ) : null}
+
+          {isSupplierReturn ? (
+            <>
+              <section className="grid gap-4 lg:grid-cols-2">
+                <DetailSection title="Informations generales">
+                  <DetailList items={supplierReturnInfoItems} />
+                </DetailSection>
+
+                <DetailSection title="Workflow">
+                  <div className="space-y-3">
+                    {currentSupplierReturnApproval ? (
+                      <div className="rounded-xl border border-border bg-background/40 p-4">
+                        <p className="text-sm text-text-secondary">Etape courante</p>
+                        <p className="mt-1 text-sm font-medium text-text-primary">
+                          Niveau {currentSupplierReturnApproval.stepOrder} -{" "}
+                          {currentSupplierReturnApproval.approverRole || "Affectation utilisateur"}
+                        </p>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          Statut:{" "}
+                          {statusLabels[currentSupplierReturnApproval.status] ||
+                            currentSupplierReturnApproval.status}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">Aucun niveau en attente.</p>
+                    )}
+
+                    {canSubmitSupplierReturn ||
+                    canDecideSupplierReturnApproval ||
+                    canPostSupplierReturn ? (
+                      <div className="space-y-3">
+                        <textarea
+                          rows={4}
+                          value={decisionNote}
+                          onChange={(event) => setDecisionNote(event.target.value)}
+                          placeholder="Note de workflow"
+                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text-primary outline-none transition focus:border-secondary"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canSubmitSupplierReturn ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "submit-supplier-return",
+                                  endpoint: `/api/supplier-returns/${recordId}/submit`,
+                                  successMessage: "Retour fournisseur soumis au workflow.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Send size={16} />
+                              Soumettre
+                            </button>
+                          ) : null}
+
+                          {canDecideSupplierReturnApproval ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "approve-supplier-return",
+                                    endpoint: `/api/supplier-returns/${recordId}/approve`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Retour fournisseur valide.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <CheckCircle2 size={16} />
+                                Valider
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "reject-supplier-return",
+                                    endpoint: `/api/supplier-returns/${recordId}/reject`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Retour fournisseur rejete.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <XCircle size={16} />
+                                Rejeter
+                              </button>
+                            </>
+                          ) : null}
+
+                          {canPostSupplierReturn ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "post-supplier-return",
+                                  endpoint: `/api/supplier-returns/${recordId}/post`,
+                                  successMessage: "Retour fournisseur comptabilise.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Upload size={16} />
+                              Poster
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucune action disponible pour ce retour fournisseur dans son etat actuel.
+                      </p>
+                    )}
+                  </div>
+                </DetailSection>
+              </section>
+
+              <DetailSection title="Lignes de retour fournisseur">
+                <DataTable
+                  columns={approvalItemsColumns}
+                  rows={record.items || []}
+                  emptyMessage="Aucune ligne de retour fournisseur."
+                />
+              </DetailSection>
+
+              <DetailSection title="Historique de validation">
+                <DataTable
+                  columns={approvalColumns}
+                  rows={record.approvals || []}
+                  emptyMessage="Aucun niveau de validation configure."
+                />
+              </DetailSection>
+            </>
+          ) : null}
+
+          {isCashSession ? (
+            <>
+              <DetailSection title="Informations generales">
+                <DetailList items={cashSessionInfoItems} />
+              </DetailSection>
+
+              <DetailSection title="Mouvements de caisse">
+                <DataTable
+                  columns={cashSessionMovementColumns}
+                  rows={record.movements || []}
+                  emptyMessage="Aucun mouvement IN/OUT enregistre sur cette session."
+                />
+              </DetailSection>
+            </>
+          ) : null}
+
+          {isInventorySession ? (
+            <>
+              <section className="grid gap-4 lg:grid-cols-2">
+                <DetailSection title="Informations generales">
+                  <DetailList items={inventorySessionInfoItems} />
+                </DetailSection>
+
+                <DetailSection title="Workflow">
+                  <div className="space-y-3">
+                    {currentInventoryApproval ? (
+                      <div className="rounded-xl border border-border bg-background/40 p-4">
+                        <p className="text-sm text-text-secondary">Etape courante</p>
+                        <p className="mt-1 text-sm font-medium text-text-primary">
+                          Niveau {currentInventoryApproval.stepOrder} -{" "}
+                          {currentInventoryApproval.approverRole || "Affectation utilisateur"}
+                        </p>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          Statut:{" "}
+                          {statusLabels[currentInventoryApproval.status] ||
+                            currentInventoryApproval.status}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucun niveau en attente.
+                      </p>
+                    )}
+
+                    {canSubmitInventorySession || canDecideInventoryApproval || canCloseInventorySession ? (
+                      <div className="space-y-3">
+                        <textarea
+                          rows={4}
+                          value={decisionNote}
+                          onChange={(event) => setDecisionNote(event.target.value)}
+                          placeholder="Note de workflow"
+                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text-primary outline-none transition focus:border-secondary"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canSubmitInventorySession ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "submit-inventory",
+                                  endpoint: `/api/inventory/sessions/${recordId}/submit`,
+                                  successMessage: "Inventaire soumis a validation.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Send size={16} />
+                              Soumettre
+                            </button>
+                          ) : null}
+
+                          {canDecideInventoryApproval ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "approve-inventory",
+                                    endpoint: `/api/inventory/sessions/${recordId}/approve`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Inventaire valide.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <CheckCircle2 size={16} />
+                                Valider
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runAction({
+                                    key: "reject-inventory",
+                                    endpoint: `/api/inventory/sessions/${recordId}/reject`,
+                                    body: decisionNote ? { note: decisionNote } : undefined,
+                                    successMessage: "Inventaire rejete.",
+                                  })
+                                }
+                                disabled={Boolean(pendingAction)}
+                                className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <XCircle size={16} />
+                                Rejeter
+                              </button>
+                            </>
+                          ) : null}
+
+                          {canCloseInventorySession ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction({
+                                  key: "close-inventory",
+                                  endpoint: `/api/inventory/sessions/${recordId}/close`,
+                                  body: decisionNote ? { note: decisionNote } : undefined,
+                                  successMessage: "Inventaire cloture.",
+                                })
+                              }
+                              disabled={Boolean(pendingAction)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <CheckCircle2 size={16} />
+                              Cloturer
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-text-secondary">
+                        Aucune action disponible pour cet inventaire dans son etat actuel.
+                      </p>
+                    )}
+                  </div>
+                </DetailSection>
+              </section>
+
+              <DetailSection title="Lignes d'inventaire">
+                <DataTable
+                  columns={inventorySessionItemsColumns}
+                  rows={record.items || []}
+                  emptyMessage="Aucune ligne d'inventaire."
+                />
+              </DetailSection>
+
+              <DetailSection title="Historique de validation">
+                <DataTable
+                  columns={approvalColumns}
+                  rows={record.approvals || []}
+                  emptyMessage="Aucun niveau de validation configure."
                 />
               </DetailSection>
             </>

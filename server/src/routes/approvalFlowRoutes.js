@@ -5,6 +5,12 @@ const approvalFlowController = require("../controllers/approvalFlowController");
 
 const router = express.Router();
 
+router.get(
+  "/catalog",
+  auth,
+  requirePermission("settings.read"),
+  approvalFlowController.listCatalog
+);
 router.get("/", auth, requirePermission("settings.read"), approvalFlowController.listFlows);
 router.post(
   "/",

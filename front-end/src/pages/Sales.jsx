@@ -3,19 +3,23 @@ import {
   BadgeCheck,
   CreditCard,
   EllipsisVertical,
-  Eye,
+  History,
+  Pencil,
   Receipt,
   TrendingUp,
+  Trash2,
   Users,
-  XCircle,
 } from "lucide-react";
 import DataTable from "../components/ui/datatable";
 import DropdownAction from "../components/ui/dropdownAction";
 import Badge from "../components/ui/badge";
 import StatCard from "../components/ui/statCard";
+import Modal from "../components/ui/modal";
+import SaleEditModal from "../components/ui/saleEditModal";
+import SaleHistoryModal from "../components/ui/saleHistoryModal";
 import useToastStore from "../stores/toastStore";
 import useCurrencyStore from "../stores/currencyStore";
-import { apiGet } from "../services/apiClient";
+import { apiDelete, apiGet, apiPatch } from "../services/apiClient";
 import {
   formatAmount,
   formatDate,
@@ -66,6 +70,7 @@ function Sales() {
   const displayCurrencyCode = useCurrencyStore(
     (state) => state.settings.primaryCurrencyCode,
   );
+  const currencySettings = useCurrencyStore((state) => state.settings);
   const showToast = useToastStore((state) => state.showToast);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -74,6 +79,12 @@ function Sales() {
   const [sortValues, setSortValues] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(6);
+  const [selectedSale, setSelectedSale] = useState(null);
+  const [historySale, setHistorySale] = useState(null);
+  const [deleteSale, setDeleteSale] = useState(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [submittingDelete, setSubmittingDelete] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -117,6 +128,7 @@ function Sales() {
 
         return {
           id: order.id,
+          raw: order,
           saleId: `#SALE-${shortId(order.id)}`,
           cashier: order.createdBy
             ? formatName(order.createdBy)
@@ -368,10 +380,59 @@ function Sales() {
     []
   );
 
-  const actionItems = [
-    { id: "view", label: "Voir", icon: Eye },
-    { id: "refund", label: "Rembourser", icon: XCircle, variant: "danger" },
-  ];
+  const handleEditSale = async (payload) => {
+    if (!selectedSale?.raw?.id) return;
+    setSubmittingEdit(true);
+    try {
+      await apiPatch(`/api/orders/${selectedSale.raw.id}`, payload);
+      const data = await apiGet("/api/orders");
+      const list = Array.isArray(data?.data) ? data.data : data;
+      setOrders(Array.isArray(list) ? list : []);
+      setSelectedSale(null);
+      showToast({
+        title: "Vente modifiee",
+        message: "La vente a ete mise a jour et historisee.",
+        variant: "success",
+      });
+    } catch (error) {
+      showToast({
+        title: "Modification impossible",
+        message: error.message || "Impossible de modifier cette vente.",
+        variant: "danger",
+      });
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  const handleDeleteSale = async () => {
+    if (!deleteSale?.raw?.id) return;
+    setSubmittingDelete(true);
+    try {
+      await apiDelete(`/api/orders/${deleteSale.raw.id}`, {
+        reason: deleteReason,
+      });
+
+      const data = await apiGet("/api/orders");
+      const list = Array.isArray(data?.data) ? data.data : data;
+      setOrders(Array.isArray(list) ? list : []);
+      setDeleteSale(null);
+      setDeleteReason("");
+      showToast({
+        title: "Vente supprimee",
+        message: "La vente a ete annulee et historisee.",
+        variant: "success",
+      });
+    } catch (error) {
+      showToast({
+        title: "Suppression impossible",
+        message: error.message || "Impossible de supprimer cette vente.",
+        variant: "danger",
+      });
+    } finally {
+      setSubmittingDelete(false);
+    }
+  };
 
   return (
     <section className="w-full h-full flex flex-col gap-4 p-4">
@@ -396,11 +457,36 @@ function Sales() {
         emptyMessage={loading ? "Chargement..." : "Aucune donnee"}
         enableSelection={false}
         actionsHeader="Action"
-        renderActions={() => (
+        renderActions={(row) => (
           <DropdownAction
             label={<EllipsisVertical size={18} strokeWidth={1.5} />}
-            items={actionItems}
-            buttonClassName="p-1 bg-transparent text-text-primary rounded-lg hover:bg-[#b0bbb7]"
+            items={[
+              {
+                id: "edit",
+                label: "Modifier",
+                icon: Pencil,
+                disabled: row.raw?.status === "CANCELED",
+                onClick: () => setSelectedSale(row),
+              },
+              {
+                id: "delete",
+                label: "Supprimer",
+                icon: Trash2,
+                variant: "danger",
+                disabled: row.raw?.status === "CANCELED",
+                onClick: () => {
+                  setDeleteSale(row);
+                  setDeleteReason("");
+                },
+              },
+              {
+                id: "history",
+                label: "Historique",
+                icon: History,
+                onClick: () => setHistorySale(row),
+              },
+            ]}
+            buttonClassName="rounded-lg bg-transparent p-1 text-text-primary hover:bg-header"
           />
         )}
         searchInput={{
@@ -443,6 +529,47 @@ function Sales() {
         }}
         tableMaxHeightClass="max-h-[45vh]"
       />
+
+      <SaleEditModal
+        isOpen={Boolean(selectedSale)}
+        onClose={() => setSelectedSale(null)}
+        sale={selectedSale?.raw || null}
+        currencySettings={currencySettings}
+        onSubmit={handleEditSale}
+        submitting={submittingEdit}
+      />
+
+      <SaleHistoryModal
+        isOpen={Boolean(historySale)}
+        onClose={() => setHistorySale(null)}
+        saleId={historySale?.raw?.id || null}
+      />
+
+      <Modal
+        isOpen={Boolean(deleteSale)}
+        title="Supprimer la vente"
+        description="La vente sera annulee, le stock sera restitue et l'action sera historisee."
+        confirmLabel={submittingDelete ? "Suppression..." : "Supprimer"}
+        cancelLabel="Annuler"
+        onCancel={() => {
+          if (submittingDelete) return;
+          setDeleteSale(null);
+          setDeleteReason("");
+        }}
+        onConfirm={handleDeleteSale}
+        confirmButtonClassName="bg-red-600 hover:bg-red-700"
+      >
+        <label className="flex flex-col gap-2 text-sm text-text-primary">
+          <span>Motif</span>
+          <textarea
+            value={deleteReason}
+            onChange={(event) => setDeleteReason(event.target.value)}
+            rows={3}
+            className="rounded-lg border border-border bg-surface px-3 py-2 outline-none focus:ring-2 focus:ring-accent"
+            placeholder="Expliquez la suppression pour l'historique"
+          />
+        </label>
+      </Modal>
     </section>
   );
 }

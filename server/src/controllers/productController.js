@@ -4,7 +4,10 @@ const { randomUUID } = require("crypto");
 const prisma = require("../config/prisma");
 const xlsx = require("xlsx");
 const { sendWorkbook, readSheetRows } = require("../utils/xlsxTemplates");
-const { loadTenantCurrencySettings } = require("../utils/currencySettings");
+const {
+  loadTenantCurrencySettings,
+  normalizeCurrencyCode,
+} = require("../utils/currencySettings");
 const {
   attachCurrencyCodes,
   getCurrencyCodeMap,
@@ -159,6 +162,34 @@ const getProductExtendedFieldMap = async (productIds = []) => {
           row.maxLevel === null || row.maxLevel === undefined ? null : Number(row.maxLevel),
         imageUrl: row.imageUrl || null,
       },
+    ]),
+  );
+};
+
+const getCategoryCollectionMap = async (categoryIds = []) => {
+  await ensureProductCategoryStructure();
+  const ids = [...new Set((categoryIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT
+      category."id" AS "categoryId",
+      category."collectionId",
+      collection."name" AS "collectionName"
+    FROM "productCategories" category
+    LEFT JOIN "productCollections" collection ON collection."id" = category."collectionId"
+    WHERE category."id" IN (${ids.map(escapeSqlValue).join(", ")})
+  `);
+
+  return new Map(
+    rows.map((row) => [
+      row.categoryId,
+      row.collectionId
+        ? {
+            id: row.collectionId,
+            name: row.collectionName || null,
+          }
+        : null,
     ]),
   );
 };
@@ -322,10 +353,19 @@ const hydrateProductsWithCurrencyCodes = async (records) => {
     list.map((item) => item.id),
   );
   const extendedMap = await getProductExtendedFieldMap(list.map((item) => item.id));
+  const categoryCollectionMap = await getCategoryCollectionMap(
+    list.map((item) => item.categoryId || item.category?.id).filter(Boolean),
+  );
   const hydrated = attachCurrencyCodes(list, currencyMap).map((item) => ({
     ...item,
     managementUnitId: item.saleUnitId || item.stockUnitId || null,
     managementUnit: item.saleUnit || item.stockUnit || null,
+    category: item.category
+      ? {
+          ...item.category,
+          collection: categoryCollectionMap.get(item.category.id) || null,
+        }
+      : null,
     ...(extendedMap.get(item.id) || {
       purchaseUnitPrice: null,
       tvaId: null,
@@ -760,6 +800,7 @@ const createProduct = async (req, res) => {
     sku,
     description,
     imageUrl,
+    currencyCode,
     unitPrice,
     purchaseUnitPrice,
     minLevel,
@@ -859,6 +900,10 @@ const createProduct = async (req, res) => {
       prisma,
       req.user.tenantId,
     );
+    const resolvedCurrencyCode = normalizeCurrencyCode(
+      currencyCode,
+      currencySettings.primaryCurrencyCode,
+    );
     const product = await createProductWithAutoSku({
       kind: normalizedKind,
       explicitSku: sku,
@@ -880,7 +925,7 @@ const createProduct = async (req, res) => {
       prisma,
       "products",
       product.id,
-      currencySettings.primaryCurrencyCode,
+      resolvedCurrencyCode,
     );
     await setProductExtendedFields(product.id, {
       purchaseUnitPrice:
@@ -1081,6 +1126,7 @@ const updateProduct = async (req, res) => {
     sku,
     description,
     imageUrl,
+    currencyCode,
     unitPrice,
     purchaseUnitPrice,
     minLevel,
@@ -1207,6 +1253,19 @@ const updateProduct = async (req, res) => {
     maxLevel: maxLevel === undefined ? undefined : maxLevel === null || maxLevel === "" ? null : Number(maxLevel),
     imageUrl: imageUrl === undefined ? undefined : imageUrl || null,
   });
+
+  if (currencyCode !== undefined) {
+    const currencySettings = await loadTenantCurrencySettings(
+      prisma,
+      req.user.tenantId,
+    );
+    await setCurrencyCode(
+      prisma,
+      "products",
+      updated.id,
+      normalizeCurrencyCode(currencyCode, currencySettings.primaryCurrencyCode),
+    );
+  }
 
   return res.json(await hydrateProductsWithCurrencyCodes(updated));
 };
@@ -1757,6 +1816,7 @@ const downloadProductTemplate = async (req, res) => {
           sku: "PROD0001",
           description: "Composant de conditionnement",
           unitPrice: 0,
+          currency: "CDF",
           category: "Conditionnement",
           family: "Composants",
           managementUnit: "Piece",
@@ -1772,6 +1832,7 @@ const downloadProductTemplate = async (req, res) => {
           TVA: "A renseigner",
           "Prix achat unitaire": 1.8,
           "Prix de vente unitaire": 2.5,
+          Devise: "CDF",
           "Unité gestion": "Plaquette",
           "Unité dosage": "mg",
           Description: "Article vendu au client",
@@ -1930,6 +1991,14 @@ const importProducts = async (req, res) => {
         "Price",
       ]) || 0,
     );
+    const rowCurrencyCode = pickRowValue(row, [
+      "Devise",
+      "devise",
+      "Currency",
+      "currency",
+      "CurrencyCode",
+      "currencyCode",
+    ]);
     const rowKind =
       forcedKind ||
       normalizeKind(
@@ -2023,7 +2092,10 @@ const importProducts = async (req, res) => {
         prisma,
         "products",
         product.id,
-        currencySettings.primaryCurrencyCode,
+        normalizeCurrencyCode(
+          rowCurrencyCode,
+          currencySettings.primaryCurrencyCode,
+        ),
       );
       created.push(product);
     } else if (rowKind && product.kind !== rowKind) {
@@ -2031,6 +2103,15 @@ const importProducts = async (req, res) => {
         where: { id: product.id },
         data: { kind: rowKind },
       });
+    }
+
+    if (rowCurrencyCode) {
+      await setCurrencyCode(
+        prisma,
+        "products",
+        product.id,
+        normalizeCurrencyCode(rowCurrencyCode, currencySettings.primaryCurrencyCode),
+      );
     }
 
     await setProductExtendedFields(product.id, {
@@ -2170,3 +2251,4 @@ module.exports = {
   importProducts,
   importTechnicalSheets,
 };
+

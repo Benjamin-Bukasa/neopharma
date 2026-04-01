@@ -319,7 +319,7 @@ function RequisitionCreate() {
           <p className="text-sm font-semibold text-text-primary">Lignes</p>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-[#b0bbb7] dark:bg-[#1D473F]">
+              <thead className="bg-header dark:bg-secondary">
                 <tr>
                   <th className="px-4 py-3 text-left">Produit</th>
                   <th className="px-4 py-3 text-left">Qte en stock</th>

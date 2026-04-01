@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
   Boxes,
+  Clock3,
   Package,
   Store,
   WalletCards,
@@ -15,7 +17,26 @@ import useAuthStore from "../stores/authStore";
 import useCurrencyStore from "../stores/currencyStore";
 import { formatMoney } from "../utils/currencyDisplay";
 
-const chartPalette = ["#1D473F", "#B0BBB7", "#D8F274", "#F59E0B", "#3B82F6", "#EF4444"];
+const THEME_COLORS = {
+  border: "rgb(var(--border))",
+  textSecondary: "rgb(var(--text-secondary))",
+  textPrimary: "rgb(var(--text-primary))",
+  primary: "rgb(var(--primary))",
+  secondary: "rgb(var(--secondary))",
+  accent: "rgb(var(--accent))",
+  header: "rgb(var(--header))",
+  warning: "rgb(var(--warning))",
+  danger: "rgb(var(--danger))",
+};
+
+const chartPalette = [
+  THEME_COLORS.secondary,
+  THEME_COLORS.header,
+  THEME_COLORS.accent,
+  THEME_COLORS.warning,
+  THEME_COLORS.primary,
+  THEME_COLORS.danger,
+];
 
 const compactNumberFormatter = new Intl.NumberFormat("fr-FR", {
   notation: "compact",
@@ -100,7 +121,7 @@ const DonutChart = ({ data, size = 180, centerLabel = "", centerValue = "" }) =>
         cy="18"
         r={radius}
         fill="none"
-        stroke="#E5E7EB"
+        stroke={THEME_COLORS.border}
         strokeWidth={stroke}
       />
       {data.map((item) => {
@@ -129,7 +150,7 @@ const DonutChart = ({ data, size = 180, centerLabel = "", centerValue = "" }) =>
         y="16.2"
         textAnchor="middle"
         fontSize="3.2"
-        fill="#6B7280"
+        fill={THEME_COLORS.textSecondary}
       >
         {centerLabel}
       </text>
@@ -139,7 +160,7 @@ const DonutChart = ({ data, size = 180, centerLabel = "", centerValue = "" }) =>
         textAnchor="middle"
         fontSize="4.2"
         fontWeight="700"
-        fill="#1D473F"
+        fill={THEME_COLORS.secondary}
       >
         {centerValue}
       </text>
@@ -186,10 +207,10 @@ const GroupedBarChart = ({ data = [], valueKeyIn, valueKeyOut, formatter }) => {
                 y1={y}
                 x2={width - 12}
                 y2={y}
-                stroke="#E5E7EB"
+                stroke={THEME_COLORS.border}
                 strokeDasharray="4 4"
               />
-              <text x="0" y={y + 4} fontSize="10" fill="#6B7280">
+              <text x="0" y={y + 4} fontSize="10" fill={THEME_COLORS.textSecondary}>
                 {formatter(value)}
               </text>
             </g>
@@ -212,7 +233,7 @@ const GroupedBarChart = ({ data = [], valueKeyIn, valueKeyOut, formatter }) => {
                 width={barWidth}
                 height={entryHeight}
                 rx="10"
-                fill="#1D473F"
+                fill={THEME_COLORS.secondary}
               />
               <rect
                 x={startX + barWidth + groupGap}
@@ -220,14 +241,14 @@ const GroupedBarChart = ({ data = [], valueKeyIn, valueKeyOut, formatter }) => {
                 width={barWidth}
                 height={outputHeight}
                 rx="10"
-                fill="#B0BBB7"
+                fill={THEME_COLORS.header}
               />
               <text
                 x={groupCenter}
                 y={222}
                 textAnchor="middle"
                 fontSize="12"
-                fill="#111827"
+                fill={THEME_COLORS.textPrimary}
               >
                 {item.label}
               </text>
@@ -275,8 +296,8 @@ const LineChart = ({ data = [] }) => {
       >
         <defs>
           <linearGradient id="dashboardLineGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1D473F" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="#1D473F" stopOpacity="0" />
+            <stop offset="0%" stopColor={THEME_COLORS.secondary} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={THEME_COLORS.secondary} stopOpacity="0" />
           </linearGradient>
         </defs>
 
@@ -289,7 +310,7 @@ const LineChart = ({ data = [] }) => {
               y1={y}
               x2={width - paddingX}
               y2={y}
-              stroke="#E5E7EB"
+              stroke={THEME_COLORS.border}
               strokeDasharray="4 4"
             />
           );
@@ -298,7 +319,7 @@ const LineChart = ({ data = [] }) => {
         <path d={areaPath} fill="url(#dashboardLineGradient)" />
         <polyline
           fill="none"
-          stroke="#1D473F"
+          stroke={THEME_COLORS.secondary}
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -311,13 +332,13 @@ const LineChart = ({ data = [] }) => {
 
           return (
             <g key={item.monthKey || item.label}>
-              <circle cx={x} cy={y} r="4.5" fill="#1D473F" />
+              <circle cx={x} cy={y} r="4.5" fill={THEME_COLORS.secondary} />
               <text
                 x={x}
                 y={height - 4}
                 textAnchor="middle"
                 fontSize="12"
-                fill="#111827"
+                fill={THEME_COLORS.textPrimary}
               >
                 {item.label}
               </text>
@@ -341,6 +362,8 @@ function Dashboard() {
     storeDistribution: [],
     soldCostVariation: [],
     summary: null,
+    expirySummary: null,
+    expiryAlerts: [],
   });
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -369,6 +392,8 @@ function Dashboard() {
           storeDistribution: [],
           soldCostVariation: [],
           summary: null,
+          expirySummary: null,
+          expiryAlerts: [],
         });
         setProducts([]);
         setLoading(false);
@@ -401,6 +426,10 @@ function Dashboard() {
             ? dashboardPayload.soldCostVariation
             : [],
           summary: dashboardPayload?.summary || null,
+          expirySummary: dashboardPayload?.expirySummary || null,
+          expiryAlerts: Array.isArray(dashboardPayload?.expiryAlerts)
+            ? dashboardPayload.expiryAlerts
+            : [],
         });
         setProducts(Array.isArray(productsPayload) ? productsPayload : []);
       } catch (requestError) {
@@ -417,6 +446,8 @@ function Dashboard() {
           storeDistribution: [],
           soldCostVariation: [],
           summary: null,
+          expirySummary: null,
+          expiryAlerts: [],
         });
         setProducts([]);
         setError(
@@ -437,6 +468,7 @@ function Dashboard() {
   }, [accessToken, logout, navigate]);
 
   const summary = dashboard.summary || {};
+  const expirySummary = dashboard.expirySummary || {};
   const latestFlow = dashboard.flowComparison?.[dashboard.flowComparison.length - 1] || {};
   const previousFlow = dashboard.flowComparison?.[dashboard.flowComparison.length - 2] || {};
   const latestSoldCost =
@@ -741,6 +773,71 @@ function Dashboard() {
     };
   }, [page, pageSize, sortedProducts.length]);
 
+  const expiryAlertRows = useMemo(() => dashboard.expiryAlerts || [], [dashboard.expiryAlerts]);
+
+  const expiryAlertColumns = useMemo(
+    () => [
+      {
+        key: "productName",
+        header: "Produit",
+        accessor: "productName",
+        render: (row) => (
+          <div>
+            <p className="font-medium text-text-primary">{row.productName || "--"}</p>
+            <p className="text-xs text-text-secondary">{row.productSku || "--"}</p>
+          </div>
+        ),
+      },
+      {
+        key: "storeName",
+        header: "Boutique / zone",
+        accessor: "storeName",
+        render: (row) => `${row.storeName || "--"} / ${row.storageZoneName || "--"}`,
+      },
+      {
+        key: "batchNumber",
+        header: "Lot",
+        accessor: "batchNumber",
+        render: (row) => row.batchNumber || "Sans lot",
+      },
+      {
+        key: "expiryDate",
+        header: "Expiration",
+        accessor: "expiryDate",
+        render: (row) =>
+          row.expiryDate
+            ? new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(
+                new Date(row.expiryDate),
+              )
+            : "--",
+      },
+      {
+        key: "status",
+        header: "Alerte",
+        accessor: "status",
+        render: (row) => (
+          <span
+            className={[
+              "inline-flex rounded-full px-3 py-1 text-xs font-medium",
+              row.status === "EXPIRE"
+                ? "bg-danger/10 text-danger"
+                : "bg-warning/10 text-warning",
+            ].join(" ")}
+          >
+            {row.status === "EXPIRE" ? "Expire" : "Expire bientot"}
+          </span>
+        ),
+      },
+      {
+        key: "quantity",
+        header: "Quantite",
+        accessor: "quantity",
+        render: (row) => formatNumber(row.quantity),
+      },
+    ],
+    [],
+  );
+
   return (
     <div className="layoutSection flex flex-col gap-4">
       <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6">
@@ -788,6 +885,62 @@ function Dashboard() {
         ))}
       </section>
 
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <article className="rounded-2xl border border-danger/20 bg-danger/5 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-danger">
+                Lots expires
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-text-primary">
+                {formatNumber(expirySummary.expiredLots)}
+              </p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Quantite concernee: {formatNumber(expirySummary.expiredQuantity)}
+              </p>
+            </div>
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/10 text-danger">
+              <AlertTriangle size={22} />
+            </span>
+          </div>
+          <div className="mt-4">
+            <Link
+              to="/lots-peremptions?expiryStatus=EXPIRE"
+              className="inline-flex items-center justify-center rounded-xl border border-danger/30 bg-surface px-4 py-2.5 text-sm font-medium text-danger transition hover:bg-danger/10"
+            >
+              Voir les lots expires
+            </Link>
+          </div>
+        </article>
+
+        <article className="rounded-2xl border border-warning/20 bg-warning/5 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-warning">
+                Expiration proche
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-text-primary">
+                {formatNumber(expirySummary.expiringSoonLots)}
+              </p>
+              <p className="mt-1 text-sm text-text-secondary">
+                Quantite concernee: {formatNumber(expirySummary.expiringSoonQuantity)}
+              </p>
+            </div>
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-warning/10 text-warning">
+              <Clock3 size={22} />
+            </span>
+          </div>
+          <div className="mt-4">
+            <Link
+              to="/lots-peremptions?expiryStatus=EXPIRE_BIENTOT"
+              className="inline-flex items-center justify-center rounded-xl border border-warning/30 bg-surface px-4 py-2.5 text-sm font-medium text-warning transition hover:bg-warning/10"
+            >
+              Voir les lots a surveiller
+            </Link>
+          </div>
+        </article>
+      </section>
+
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <article className="min-w-0 rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -830,11 +983,11 @@ function Dashboard() {
 
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-text-secondary">
             <span className="inline-flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#1D473F]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-secondary" />
               Entrees: {flowChart.formatter(flowChart.entryTotal)}
             </span>
             <span className="inline-flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#B0BBB7]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-header" />
               Sorties: {flowChart.formatter(flowChart.outputTotal)}
             </span>
           </div>
@@ -938,6 +1091,17 @@ function Dashboard() {
           </div>
         </article>
       </section>
+
+      <AdminDataTable
+        title="Alertes lots / peremptions"
+        description="Lots expires ou expirant bientot detectes sur le stock courant."
+        columns={expiryAlertColumns}
+        rows={expiryAlertRows}
+        loading={loading}
+        error=""
+        emptyMessage="Aucune alerte de peremption detectee."
+        enableSelection={false}
+      />
 
       <AdminDataTable
         title="Tous les articles de vente du systeme"

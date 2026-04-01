@@ -9,7 +9,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AdminDataTable from "../components/ui/AdminDataTable";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import DropdownAction from "../components/ui/dropdownAction";
@@ -94,6 +94,30 @@ const filterDefinitions = [
     label: "Type zone",
     accessor: "zoneType",
     queryKey: "zoneType",
+  },
+  {
+    id: "expiryStatus",
+    label: "Peremption",
+    accessor: "expiryStatus",
+    queryKey: "expiryStatus",
+    options: [
+      { value: "EXPIRE", label: "Expire" },
+      { value: "EXPIRE_BIENTOT", label: "Expire bientot" },
+      { value: "OK", label: "Valide" },
+      { value: "SANS_DATE", label: "Sans date" },
+    ],
+    formatLabel: (value) => {
+      switch (String(value || "").toUpperCase()) {
+        case "EXPIRE":
+          return "Expire";
+        case "EXPIRE_BIENTOT":
+          return "Expire bientot";
+        case "OK":
+          return "Valide";
+        default:
+          return "Sans date";
+      }
+    },
   },
   {
     id: "isActive",
@@ -248,6 +272,7 @@ const resolveDeleteLabel = (row) =>
 const AdminResourcePage = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const currentRoute = findRouteByPath(location.pathname);
   useCurrencyStore((state) => state.settings.primaryCurrencyCode);
   const loadCurrencySettings = useCurrencyStore((state) => state.loadSettings);
@@ -304,7 +329,20 @@ const AdminResourcePage = () => {
 
   useEffect(() => {
     setPage(1);
-    setFilters({});
+    const nextFilters = {};
+    filterDefinitions.forEach((definition) => {
+      const value = searchParams.get(definition.queryKey || definition.id);
+      if (value) {
+        nextFilters[definition.id] = value;
+      }
+    });
+    if (searchParams.get("createdFrom")) {
+      nextFilters.createdFrom = searchParams.get("createdFrom");
+    }
+    if (searchParams.get("createdTo")) {
+      nextFilters.createdTo = searchParams.get("createdTo");
+    }
+    setFilters(nextFilters);
     setSort({ sortBy: "", sortDir: "desc" });
     setError("");
     setPageSize(resource?.pageSize || 10);
@@ -317,7 +355,7 @@ const AdminResourcePage = () => {
     setTemplateLoading(false);
     setImportLoading(false);
     setImportResult(null);
-  }, [location.pathname, resource?.pageSize]);
+  }, [location.pathname, resource?.pageSize, searchParams]);
 
   const sortItems = useMemo(
     () => buildSortItems(resource?.columns || []),
@@ -884,7 +922,10 @@ const AdminResourcePage = () => {
             token: accessToken,
             query: buildQuery({ includePagination: false, exportType: item.id }),
           });
-          downloadBlob(blob, `${slugify(currentRoute.name)}.${item.id}`);
+          downloadBlob(
+            blob,
+            `${slugify(resource?.exportFileBaseName || currentRoute.name)}.${item.id}`,
+          );
           showToast({
             title: "Export termine",
             message: `Le fichier ${item.label} a ete genere.`,
@@ -901,7 +942,7 @@ const AdminResourcePage = () => {
         const csv = buildCsvContent(resource?.columns || [], displayedRows);
         downloadBlob(
           new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" }),
-          `${slugify(currentRoute.name)}.csv`,
+          `${slugify(resource?.exportFileBaseName || currentRoute.name)}.csv`,
         );
         showToast({
           title: "Export termine",

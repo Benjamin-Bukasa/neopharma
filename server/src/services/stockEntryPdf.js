@@ -68,6 +68,13 @@ const buildStockEntryPdf = (entry, currencySettings = {}, companyName) =>
     columns: [
       { label: "Code", width: 1.2, value: (row) => row.product?.sku || "-" },
       { label: "Article", width: 2.6, value: (row) => row.product?.name || "-" },
+      { label: "Lot", width: 1.2, value: (row) => row.batchNumber || "Sans lot" },
+      {
+        label: "Expiration",
+        width: 1.2,
+        value: (row) =>
+          row.expiryDate ? formatDateTime(row.expiryDate).split(",")[0] : "-",
+      },
       { label: "Unite", width: 0.8, value: (row) => row.unit?.symbol || row.unit?.name || "-" },
       { label: "Qte", width: 0.8, value: (row) => row.quantity ?? 0 },
       {

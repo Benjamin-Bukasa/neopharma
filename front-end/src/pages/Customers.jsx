@@ -346,7 +346,7 @@ function Customers() {
           <DropdownAction
             label={<EllipsisVertical size={18} strokeWidth={1.5} />}
             items={actionItems}
-            buttonClassName="p-1 bg-transparent text-text-primary rounded-lg hover:bg-[#b0bbb7]"
+            buttonClassName="rounded-lg bg-transparent p-1 text-text-primary hover:bg-header"
           />
         )}
         searchInput={{

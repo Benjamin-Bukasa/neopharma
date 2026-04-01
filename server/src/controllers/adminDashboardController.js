@@ -7,6 +7,12 @@ const {
   attachCurrencyCodes,
   getCurrencyCodeMap,
 } = require("../utils/moneyCurrency");
+const {
+  ensureInventoryLotTables,
+  listInventoryLots,
+  materializeResidualUntrackedLot,
+  emitLotExpiryNotifications,
+} = require("../utils/inventoryLotStore");
 
 const toNumber = (value) => {
   const amount = Number(value || 0);
@@ -104,6 +110,18 @@ const resolveUnitCostAt = (costHistory, productId, referenceDate) => {
   return resolved || events[0]?.unitCost || 0;
 };
 
+const getExpiryStatus = (expiryDate) => {
+  if (!expiryDate) return "SANS_DATE";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(expiryDate);
+  target.setHours(0, 0, 0, 0);
+  const diffDays = Math.ceil((target.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return "EXPIRE";
+  if (diffDays <= 30) return "EXPIRE_BIENTOT";
+  return "OK";
+};
+
 const getAdminDashboard = async (req, res) => {
   const currencySettings = await loadTenantCurrencySettings(
     prisma,
@@ -155,6 +173,7 @@ const getAdminDashboard = async (req, res) => {
       },
       select: {
         storeId: true,
+        storageZoneId: true,
         productId: true,
         quantity: true,
         store: {
@@ -177,6 +196,23 @@ const getAdminDashboard = async (req, res) => {
       },
     }),
   ]);
+
+  await ensureInventoryLotTables();
+  await prisma.$transaction(async (tx) => {
+    for (const row of inventoryRows) {
+      await materializeResidualUntrackedLot(tx, {
+        tenantId: req.user.tenantId,
+        storeId: row.storeId,
+        storageZoneId: row.storageZoneId,
+        productId: row.productId,
+      });
+    }
+  });
+
+  const inventoryLots = await listInventoryLots({
+    tenantId: req.user.tenantId,
+    includeZero: false,
+  });
 
   const stockEntryItemCurrencyMap = await getCurrencyCodeMap(
     prisma,
@@ -280,11 +316,57 @@ const getAdminDashboard = async (req, res) => {
     soldCost: soldCostVariation.reduce((sum, item) => sum + item.value, 0),
   };
 
+  const expiryAlerts = inventoryLots
+    .map((row) => {
+      const status = getExpiryStatus(row.expiryDate);
+      const daysToExpiry =
+        row.expiryDate == null
+          ? null
+          : Math.ceil(
+              (new Date(row.expiryDate).getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000,
+            );
+      return {
+        id: row.id,
+        productId: row.productId,
+        productName: row.product?.name || "",
+        productSku: row.product?.sku || "",
+        batchNumber: row.batchNumber || null,
+        expiryDate: row.expiryDate || null,
+        daysToExpiry,
+        status,
+        quantity: toNumber(row.quantity),
+        storeName: row.store?.name || "",
+        storageZoneName: row.storageZone?.name || "",
+      };
+    })
+    .filter((row) => row.status === "EXPIRE" || row.status === "EXPIRE_BIENTOT")
+    .sort((left, right) => {
+      const leftRank = left.status === "EXPIRE" ? 0 : 1;
+      const rightRank = right.status === "EXPIRE" ? 0 : 1;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return toNumber(left.daysToExpiry) - toNumber(right.daysToExpiry);
+    });
+
+  const expirySummary = {
+    expiredLots: expiryAlerts.filter((row) => row.status === "EXPIRE").length,
+    expiringSoonLots: expiryAlerts.filter((row) => row.status === "EXPIRE_BIENTOT").length,
+    expiredQuantity: expiryAlerts
+      .filter((row) => row.status === "EXPIRE")
+      .reduce((sum, row) => sum + toNumber(row.quantity), 0),
+    expiringSoonQuantity: expiryAlerts
+      .filter((row) => row.status === "EXPIRE_BIENTOT")
+      .reduce((sum, row) => sum + toNumber(row.quantity), 0),
+  };
+
+  await emitLotExpiryNotifications(req.user.tenantId);
+
   return res.json({
     flowComparison,
     storeDistribution,
     soldCostVariation,
     summary,
+    expirySummary,
+    expiryAlerts: expiryAlerts.slice(0, 8),
     currencySettings,
   });
 };

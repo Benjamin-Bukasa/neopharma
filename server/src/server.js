@@ -27,8 +27,10 @@ const purchaseRequestRoutes = require("./routes/purchaseRequestRoutes");
 const purchaseOrderRoutes = require("./routes/purchaseOrderRoutes");
 const deliveryNoteRoutes = require("./routes/deliveryNoteRoutes");
 const stockEntryRoutes = require("./routes/stockEntryRoutes");
+const supplierReturnRoutes = require("./routes/supplierReturnRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const cashSessionRoutes = require("./routes/cashSessionRoutes");
 const adminDashboardRoutes = require("./routes/adminDashboardRoutes");
 const currencySettingsRoutes = require("./routes/currencySettingsRoutes");
 const customerBonusProgramRoutes = require("./routes/customerBonusProgramRoutes");
@@ -42,6 +44,11 @@ const { ensureCustomerBonusProgramsTable } = require("./utils/customerBonusProgr
 const { ensureTaxRatesTable } = require("./utils/taxRateStore");
 const { ensurePermissionProfileTables } = require("./utils/permissionProfileStore");
 const { ensureTenantCurrencyColumns } = require("./utils/currencySettings");
+const { ensureCashSessionTables } = require("./utils/cashSessionStore");
+const { ensureInventorySessionTables } = require("./utils/inventorySessionStore");
+const { ensureUserPreferenceTable } = require("./utils/userPreferenceStore");
+const { ensureDocumentApprovalTable } = require("./utils/documentApprovalStore");
+const { ensureSupplierReturnTables } = require("./controllers/supplierReturnController");
 
 const app = express();
 const server = http.createServer(app);
@@ -82,8 +89,10 @@ app.use("/api/purchase-requests", purchaseRequestRoutes);
 app.use("/api/purchase-orders", purchaseOrderRoutes);
 app.use("/api/delivery-notes", deliveryNoteRoutes);
 app.use("/api/stock-entries", stockEntryRoutes);
+app.use("/api/supplier-returns", supplierReturnRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/cash-sessions", cashSessionRoutes);
 app.use("/api/admin-dashboard", adminDashboardRoutes);
 app.use("/api/currency-settings", currencySettingsRoutes);
 app.use("/api/customer-bonus-programs", customerBonusProgramRoutes);
@@ -115,6 +124,21 @@ const bootstrap = async () => {
 
   await ensurePermissionProfileTables();
   console.log("Permission profiles ready.");
+
+  await ensureCashSessionTables();
+  console.log("Cash sessions ready.");
+
+  await ensureInventorySessionTables();
+  console.log("Inventory sessions ready.");
+
+  await ensureUserPreferenceTable();
+  console.log("User preferences ready.");
+
+  await ensureDocumentApprovalTable();
+  console.log("Document approvals ready.");
+
+  await ensureSupplierReturnTables();
+  console.log("Supplier returns ready.");
 
   server.listen(port, () => {
     console.log(`Server running on port ${port}`);

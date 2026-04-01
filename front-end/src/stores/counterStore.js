@@ -9,6 +9,9 @@ const useCounterStore = create(
         stock: "all",
         status: "all",
         category: "all",
+        family: "all",
+        subFamily: "all",
+        collection: "all",
         keyword: "",
       },
       sortValues: {
@@ -49,7 +52,10 @@ const useCounterStore = create(
               {
                 id: product.id,
                 product: product.product,
+                collection: product.collection,
                 category: product.category,
+                family: product.family,
+                subFamily: product.subFamily,
                 stock: product.stock,
                 quantity: product.quantity,
                 price: product.price,

@@ -6,6 +6,15 @@
 
 @layer base {
   :root {
+    --primary: 0 46 49;
+    --secondary: 29 71 63;
+    --accent: 216 242 116;
+    --success: 22 163 74;
+    --warning: 217 119 6;
+    --danger: 220 38 38;
+    --dark-background: 12 20 21;
+    --dark-surface: 18 27 28;
+    --dark-border: 60 78 80;
     --background: 243 244 246;
     --surface: 255 255 255;
     --border: 229 231 235;
@@ -15,9 +24,15 @@
   }
 
   .dark {
-    --background: 12 20 21;
-    --surface: 18 27 28;
-    --border: 60 78 80;
+    --primary: 0 46 49;
+    --secondary: 29 71 63;
+    --accent: 216 242 116;
+    --success: 22 163 74;
+    --warning: 217 119 6;
+    --danger: 220 38 38;
+    --background: var(--dark-background);
+    --surface: var(--dark-surface);
+    --border: var(--dark-border);
     --text-primary: 203 213 225;
     --text-secondary: 148 163 184;
     --header: 29 71 63;
@@ -80,18 +95,18 @@
   }
 
   .table-scroll::-webkit-scrollbar-track {
-    background: #f3f4f6;
+    background: rgb(var(--background));
     border-radius: 999px;
   }
 
   .table-scroll::-webkit-scrollbar-thumb {
-    background: #b0bbb7;
+    background: rgb(var(--header));
     border-radius: 999px;
   }
 
   .table-scroll {
     scrollbar-width: thin;
-    scrollbar-color: #b0bbb7 #f3f4f6;
+    scrollbar-color: rgb(var(--header)) rgb(var(--background));
   }
 
   .sidebar-scroll::-webkit-scrollbar {

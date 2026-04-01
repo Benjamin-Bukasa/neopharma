@@ -45,7 +45,7 @@ const DropdownSort = ({
         </div>
       }
       buttonClassName={[
-        "rounded-lg border border-border bg-surface px-4 py-2 font-medium text-text-primary hover:bg-background dark:bg-surface dark:hover:bg-background/70",
+        "rounded-lg bg-transparent px-4 py-2 font-medium text-text-primary hover:bg-surface/70 dark:bg-transparent dark:hover:bg-surface/70",
         buttonClassName,
       ].join(" ")}
       menuClassName="w-[320px] shadow-xl"

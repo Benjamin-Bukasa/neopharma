@@ -20,7 +20,28 @@ import useRealtimeStore from "../../../stores/realtimeStore";
 import useAuthStore from "../../../stores/authStore";
 import useUiStore from "../../../stores/uiStore";
 import { formatName } from "../../../utils/formatters";
-import { findRouteByPath, getBreadcrumbItems } from "../../../routes/router";
+import { allRouteMeta, findRouteByPath, getBreadcrumbItems } from "../../../routes/router";
+
+const normalizeSearchText = (value = "") =>
+  String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const scoreSearchItem = (item, query) => {
+  const normalizedQuery = normalizeSearchText(query);
+  const label = normalizeSearchText(item.name);
+  const summary = normalizeSearchText(item.summary);
+  const path = normalizeSearchText(item.path);
+
+  if (!normalizedQuery) return 0;
+  if (label === normalizedQuery) return 100;
+  if (label.startsWith(normalizedQuery)) return 80;
+  if (label.includes(normalizedQuery)) return 60;
+  if (summary.includes(normalizedQuery)) return 40;
+  if (path.includes(normalizedQuery)) return 20;
+  return 0;
+};
 
 const Navbar = () => {
   const theme = useThemeStore((state) => state.theme);
@@ -90,6 +111,39 @@ const Navbar = () => {
     setSearchValue(searchParams.get("q") || "");
   }, [searchParams]);
 
+  const globalSearchResults = useMemo(() => {
+    if (normalizeSearchText(searchScope) !== "tous") return [];
+    const query = searchValue.trim();
+    if (!query) return [];
+
+    const matched = allRouteMeta
+      .filter((item) => item?.path && item?.name)
+      .map((item, index) => ({
+        ...item,
+        order: index + 1,
+        score: scoreSearchItem(item, query),
+      }))
+      .filter((item) => item.score > 0);
+
+    if (searchSort === "A-Z") {
+      return matched.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    }
+    if (searchSort === "Z-A") {
+      return matched.sort((a, b) => b.name.localeCompare(a.name, "fr"));
+    }
+    if (searchSort === "Plus recent") {
+      return matched.sort((a, b) => b.order - a.order);
+    }
+    if (searchSort === "Plus ancien") {
+      return matched.sort((a, b) => a.order - b.order);
+    }
+
+    return matched.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.order - b.order;
+    });
+  }, [searchScope, searchSort, searchValue]);
+
   const resolveSearchTarget = () => {
     const scope = searchScope.toLowerCase();
     if (scope === "produits") return "/configurations/articles/produits";
@@ -100,6 +154,13 @@ const Navbar = () => {
 
   const handleSearchSubmit = (event) => {
     event.preventDefault();
+    if (normalizeSearchText(searchScope) === "tous") {
+      const firstResult = globalSearchResults[0];
+      if (firstResult) {
+        navigate(firstResult.path);
+      }
+      return;
+    }
     const targetPath = resolveSearchTarget();
     const nextParams = new URLSearchParams();
     if (searchValue.trim()) {
@@ -149,7 +210,7 @@ const Navbar = () => {
           </div>
         </div>
 
-        <div className="w-full md:max-w-md">
+        <div className="relative w-full md:max-w-md">
           <form
             onSubmit={handleSearchSubmit}
             className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2"
@@ -188,10 +249,42 @@ const Navbar = () => {
               }
               items={sortItems}
               onSelect={(item) => setSearchSort(item.label)}
-              buttonClassName="bg-neutral-300 p-2 text-text-primary hover:bg-neutral-400 dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70"
+              buttonClassName="bg-background p-2 text-text-primary hover:bg-surface dark:border dark:border-border dark:bg-surface dark:hover:bg-surface/70"
               menuClassName="min-w-[180px]"
             />
           </form>
+          {normalizeSearchText(searchScope) === "tous" && searchValue.trim() ? (
+            <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-xl">
+              {globalSearchResults.length > 0 ? (
+                <div className="max-h-80 overflow-y-auto py-2">
+                  {globalSearchResults.map((item) => (
+                    <button
+                      key={`${item.path}-${item.name}`}
+                      type="button"
+                      onClick={() => navigate(item.path)}
+                      className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition hover:bg-background"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {item.name}
+                        </p>
+                        <p className="truncate text-xs text-text-secondary">
+                          {item.summary || item.sectionLabel || item.parentLabel || item.path}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-[11px] text-text-secondary">
+                        {item.path}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-3 text-sm text-text-secondary">
+                  Aucun resultat.
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar md:gap-3 md:overflow-visible md:pb-0">
@@ -305,7 +398,7 @@ const Navbar = () => {
           <DropdownAction
             label={
               <div className="flex items-center gap-4">
-                <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-neutral-300 text-text-primary dark:border dark:border-border dark:bg-surface">
+                <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-background text-text-primary dark:border dark:border-border dark:bg-surface">
                   {avatarUrl ? (
                     <img src={avatarUrl} alt={`Avatar ${fullName}`} className="h-full w-full object-cover" />
                   ) : (
@@ -351,7 +444,7 @@ const Navbar = () => {
             ]}
             onSelect={async (item) => {
               if (item.id === "profile") navigate("/configurations/utilisateur/liste-utilisateurs");
-              if (item.id === "settings") navigate("/configurations/parametres/unite");
+              if (item.id === "settings") navigate("/settings");
               if (item.id === "logout") {
                 await logout();
                 navigate("/login", { replace: true });

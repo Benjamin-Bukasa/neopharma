@@ -7,19 +7,33 @@ const {
   buildDateRangeFilter,
 } = require("../utils/listing");
 const { sendExport } = require("../utils/exporter");
+const {
+  APPROVAL_FLOW_CATALOG,
+  APPROVAL_FLOW_CODE_SET,
+  normalizeApprovalFlowCode,
+  findApprovalFlowCatalogEntry,
+} = require("../utils/approvalFlowCatalog");
+
+const listCatalog = async (_req, res) => res.json(APPROVAL_FLOW_CATALOG);
 
 const createFlow = async (req, res) => {
   const { code, name, steps } = req.body || {};
+  const normalizedCode = normalizeApprovalFlowCode(code);
+  const catalogEntry = findApprovalFlowCatalogEntry(normalizedCode);
 
-  if (!code || !name) {
-    return res.status(400).json({ message: "code and name are required." });
+  if (!normalizedCode) {
+    return res.status(400).json({ message: "Le code du niveau de validation est requis." });
+  }
+
+  if (!APPROVAL_FLOW_CODE_SET.has(normalizedCode)) {
+    return res.status(400).json({ message: "Code de niveau de validation invalide." });
   }
 
   const flow = await prisma.approvalFlow.create({
     data: {
       tenantId: req.user.tenantId,
-      code,
-      name,
+      code: normalizedCode,
+      name: String(name || catalogEntry?.name || "").trim() || catalogEntry.name,
       steps: Array.isArray(steps)
         ? {
             create: steps.map((step) => ({
@@ -108,6 +122,8 @@ const listFlows = async (req, res) => {
 const updateFlow = async (req, res) => {
   const { id } = req.params;
   const { code, name, steps } = req.body || {};
+  const normalizedCode = normalizeApprovalFlowCode(code);
+  const catalogEntry = findApprovalFlowCatalogEntry(normalizedCode);
 
   const flow = await prisma.approvalFlow.findFirst({
     where: { id, tenantId: req.user.tenantId },
@@ -117,6 +133,14 @@ const updateFlow = async (req, res) => {
     return res.status(404).json({ message: "Approval flow not found." });
   }
 
+  if (!normalizedCode) {
+    return res.status(400).json({ message: "Le code du niveau de validation est requis." });
+  }
+
+  if (!APPROVAL_FLOW_CODE_SET.has(normalizedCode)) {
+    return res.status(400).json({ message: "Code de niveau de validation invalide." });
+  }
+
   await prisma.approvalFlowStep.deleteMany({
     where: { flowId: id },
   });
@@ -124,8 +148,8 @@ const updateFlow = async (req, res) => {
   const updated = await prisma.approvalFlow.update({
     where: { id },
     data: {
-      code,
-      name,
+      code: normalizedCode,
+      name: String(name || catalogEntry?.name || flow.name || "").trim() || catalogEntry.name,
       steps: Array.isArray(steps)
         ? {
             create: steps.map((step) => ({
@@ -159,6 +183,7 @@ const deleteFlow = async (req, res) => {
 };
 
 module.exports = {
+  listCatalog,
   createFlow,
   listFlows,
   updateFlow,
